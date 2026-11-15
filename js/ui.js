@@ -14,7 +14,7 @@
     drag: null, pan: null, sel: 0, keys: {},
     // cx/cy = Blickziel, zoom = Vergrößerung; yaw/pitch = Drehung und Neigung der 3D-Kamera
     view: { cx: TT.W / 2, cy: TT.H / 2, zoom: 36, w: 800, h: 600, yaw: 0, pitch: 1.0 },
-    mode3d: false,
+    mode3d: false, title: false,
     dpr: 1, paused: false, speed: 1, started: false, overlayOpen: false, endShown: false,
     lastMsg: 0, hudT: 0, miniT: 0, saveT: 0, infoText: "", hintText: "",
   };
@@ -53,6 +53,8 @@
     $("game3d").style.display = on ? "block" : "none";
     $("b-view").textContent = on ? "Ansicht: 3D" : "Ansicht: 2D";
     $("b-view").style.display = TT.V3 && TT.V3.ok ? "" : "none";
+    $("t-view").textContent = $("b-view").textContent;
+    $("t-view").style.display = $("b-view").style.display;
     const z = ui.view.zoom / ui.dpr;                 // Zoomgrenzen der beiden Ansichten unterscheiden sich leicht
     ui.view.zoom = TT.clamp(z, on ? 16 : 14, on ? 90 : 80) * ui.dpr;
   };
@@ -408,6 +410,14 @@
       if (ev.repeat) return;
       if (ui.overlayOpen) {
         if ((ev.code === "Escape" || ev.code === "KeyM") && ui.started && ui.overlayKind === "menu") closeOverlay();
+        else if (ev.code === "Escape" && ui.overlayKind === "help") closeOverlay();
+        return;
+      }
+      if (ui.title) {                                   // im Hauptmenü: Eingabetaste = oberster Knopf
+        if (ev.code === "Enter" || ev.code === "NumpadEnter") {
+          ev.preventDefault();
+          ($("t-continue").hidden ? $("t-new") : $("t-continue")).click();
+        }
         return;
       }
       switch (ev.code) {
@@ -445,6 +455,7 @@
 
   function saveGame(loud) {
     try {
+      TT.state.savedAt = Date.now();
       localStorage.setItem(SAVE_KEY, TT.serialize(TT.state));
       if (loud) TT.msg(TT.state, "Spiel gespeichert.", "info");
       return true;
@@ -455,6 +466,7 @@
   }
 
   function begin(fresh) {
+    hideTitle();
     const s = TT.state;
     ui.view.cx = (s.coreIdx % s.W) + 0.5; ui.view.cy = ((s.coreIdx / s.W) | 0) + 0.5;
     ui.sel = 0; ui.started = true; ui.paused = false; ui.endShown = false; ui.saveT = 0;
@@ -475,6 +487,123 @@
     begin(false);
     TT.msg(TT.state, "Spielstand geladen.", "info");
     return true;
+  }
+
+  /* ---------- Hauptmenü ----------
+     Hinter dem Menü läuft ein fertig eingerichteter Beispiel-Dungeon, die Kamera kreist langsam. */
+  let demo = null, confirmNew = 0;
+
+  function makeDemo() {
+    const s = TT.newGame(7), W = s.W, cx = s.coreIdx % W, cy = (s.coreIdx / W) | 0, ID = TT.ROOM_ID, r = TT.rng(5);
+    TT.RESEARCH.forEach((q) => { s.research.done[q.key] = true; });
+    s.research.cur = null;
+    for (let y = cy - 6; y <= cy + 6; y++) for (let x = cx - 10; x <= cx + 10; x++) {
+      if (x < 1 || y < 1 || x > W - 2 || y > s.H - 2) continue;
+      const i = y * W + x;
+      s.tiles[i] = T.CLAIMED; s.ore[i] = 0; s.mark[i] = 0; s.dig[i] = 0;
+    }
+    TT.reveal(s, s.coreIdx, 15);
+    [["treasury", -9, -5, -7, -3], ["lair", -5, -5, -2, -3], ["garden", 2, -5, 4, -3], ["training", 6, -5, 9, -3],
+     ["archive", -9, 3, -6, 5], ["forge", -4, 3, -2, 5], ["prison", 5, 3, 8, 5]].forEach((q) => {
+      for (let y = cy + q[2]; y <= cy + q[4]; y++) for (let x = cx + q[1]; x <= cx + q[3]; x++) {
+        const i = y * W + x;
+        if (TT.isSpecial(s, i)) continue;
+        s.room[i] = ID[q[0]];
+        if (q[0] === "garden") s.food[i] = 3;
+      }
+    });
+    TT.countRooms(s);
+    s.gold = Math.round(TT.goldCap(s) * 0.75);
+    s.parts = 40;
+    [["door", 0, 4], ["spike", 1, 4], ["flame", -1, 4]].forEach((q) => TT.actTrap(s, q[0], (cy + q[2]) * W + cx + q[1]));
+    // Kreaturen in den Gängen rund um den Herzkern verteilen
+    const free = [];
+    for (let y = cy - 2; y <= cy + 2; y++) for (let x = cx - 8; x <= cx + 8; x++) {
+      const i = y * W + x;
+      if (Math.abs(x - cx) > 2 && !s.room[i] && !s.obj[i] && !TT.isSpecial(s, i)) free.push(i);
+    }
+    ["schrat", "schrat", "schrat", "spucker", "spucker", "fluesterer", "fluesterer", "eisenwanst", "klinge", "klinge", "nachtmahr"].forEach((t) => {
+      const e = TT.spawn(s, t, free[(r() * free.length) | 0], false);
+      e.lvl = 1 + ((r() * 4) | 0); e.hp = TT.maxHp(s, e); e.hunger = r() * 40;
+    });
+    // zwei gefangene Helden, die nie überlaufen
+    const cells = [];
+    for (let i = 0; i < s.room.length; i++) if (s.room[i] === ID.prison) cells.push(i);
+    s.prisoners.push({ type: "ritter", idx: cells[1], t: -1e9, lvl: 3 }, { type: "priester", idx: cells[cells.length - 2], t: -1e9, lvl: 2 });
+    TT.actMark(s, cx + 11, cy - 3, cx + 14, cy + 2, true);          // die Wühler haben etwas zu tun
+    s.waveT = 1e12; s.payT = 1e12; s.msgs = [];
+    return s;
+  }
+
+  function ago(ms) {
+    const m = Math.round((Date.now() - ms) / 60000);
+    if (m < 1) return "gerade eben";
+    if (m < 60) return "vor " + m + " Min.";
+    const hh = Math.round(m / 60);
+    if (hh < 48) return "vor " + hh + (hh === 1 ? " Stunde" : " Stunden");
+    return "vor " + Math.round(hh / 24) + " Tagen";
+  }
+
+  function resetNewButton() {
+    confirmNew = 0;
+    $("t-new").classList.remove("confirm");
+    $("t-new-label").textContent = "Neues Spiel";
+    $("t-new-hint").textContent = readSave() ? "Beginnt auf einer neuen Karte" : "Eine neue Karte, ein neuer Herzkern";
+  }
+
+  function refreshTitle() {
+    const txt = readSave();
+    let info = "";
+    if (txt) {
+      try {
+        const s = TT.deserialize(txt), c = TT.countOwn(s);
+        info = (s.over ? "Herzkern zerbrochen" : "Überfall " + (s.waveN + 1) + " steht bevor") + " · " +
+          c.fighters + " Kreaturen · " + TT.fmtTime(s.time) + " gespielt" + (s.savedAt ? " · " + ago(s.savedAt) : "");
+      } catch (err) { info = ""; }
+    }
+    $("t-continue").hidden = !info;
+    $("t-save").textContent = info;
+    resetNewButton();
+  }
+
+  function showTitle() {
+    closeOverlay();
+    ui.title = true; ui.started = false; ui.paused = false; ui.sel = 0; ui.hx = -1;
+    TT.state = demo || (demo = makeDemo());
+    TT.quiet = true;                                       // der Beispiel-Dungeon macht keine Geräusche
+    ui.view.zoom = 40 * ui.dpr; ui.view.pitch = 0.8;
+    document.body.classList.add("title-mode");
+    setTool({ kind: "select" });
+    refreshTitle();
+  }
+
+  function hideTitle() {
+    ui.title = false; TT.quiet = false;
+    clearTimeout(confirmNew);
+    document.body.classList.remove("title-mode");
+  }
+
+  function bindTitle() {
+    $("t-credits").innerHTML = CREDITS.replace(/<\/?p[^>]*>/g, "");
+    $("t-continue").addEventListener("click", () => {
+      TT.audioOn = true;
+      if (!loadGame()) $("t-save").textContent = "Der Spielstand ließ sich nicht laden.";
+    });
+    $("t-new").addEventListener("click", () => {
+      TT.audioOn = true;
+      // Gibt es einen Spielstand, muss der Neustart bestätigt werden – das automatische Speichern überschreibt ihn sonst
+      if (readSave() && !confirmNew) {
+        confirmNew = setTimeout(resetNewButton, 5000);
+        $("t-new").classList.add("confirm");
+        $("t-new-label").textContent = "Wirklich neu beginnen?";
+        $("t-new-hint").textContent = "Nochmal klicken – dein gespeichertes Spiel wird dann überschrieben";
+        return;
+      }
+      newGame();
+    });
+    $("t-help").addEventListener("click", () => { TT.audioOn = true; openOverlay("help"); });
+    $("t-view").addEventListener("click", (ev) => { ui.setMode(!ui.mode3d); savePref(); ev.currentTarget.blur(); });
+    $("t-sound").addEventListener("click", (ev) => { $("b-sound").click(); ev.currentTarget.blur(); });
   }
 
   /* ---------- Menüs ---------- */
@@ -499,22 +628,22 @@
       " · Besiegte Eindringlinge: " + s.stats.kills + " · Gefallene Kreaturen: " + s.stats.lost +
       " · Gefördertes Gold: " + s.stats.mined + "</p>";
     let h;
-    if (kind === "start") {
-      h = "<h1>TIEFENTHRON</h1><p class=\"tag\">Unter der Erde herrscht, wer am tiefsten gräbt.</p>" +
+    if (kind === "help") {
+      h = "<h2>Anleitung</h2>" +
         "<p>Du bist der Geist im Herzkern. Lass graben, baue Räume, locke Kreaturen durch den Riss – und halte die " +
         "Helden der Oberwelt von deinem Kern fern. Wer zehn Überfälle übersteht und den Lichtvogt bezwingt, dem gehört die Tiefe.</p>" +
-        HELP + '<div class="row"><button class="main" data-a="new">Neues Spiel</button>' + loadBtn + "</div>" + CREDITS;
+        HELP + '<div class="row"><button class="main" data-a="back">Zurück</button></div>' + CREDITS;
     } else if (kind === "menu") {
       h = "<h2>Pause</h2>" + HELP + '<div class="row"><button class="main" data-a="resume">Weiter</button>' +
-        '<button data-a="save">Speichern</button>' + loadBtn + '<button data-a="new">Neues Spiel</button></div>' + CREDITS;
+        '<button data-a="save">Speichern</button><button data-a="title">Hauptmenü</button></div>' + CREDITS;
     } else if (kind === "over") {
       h = '<h2 class="bad">Der Herzkern ist zerbrochen</h2><p>Das Licht der Oberwelt flutet deine Gänge. Die Horde zerstreut sich, ' +
         "der Riss fällt in sich zusammen.</p>" + stats +
-        '<div class="row"><button class="main" data-a="new">Neues Spiel</button>' + loadBtn + "</div>";
+        '<div class="row"><button class="main" data-a="new">Neues Spiel</button>' + loadBtn + '<button data-a="title">Hauptmenü</button></div>';
     } else {
       h = "<h2>Die Tiefe gehört dir</h2><p>Der Lichtvogt ist gefallen, seine Fackeln sind erloschen. Kein Held wagt sich " +
         "mehr freiwillig in deine Gänge – fürs Erste.</p>" + stats +
-        '<div class="row"><button class="main" data-a="resume">Weiterspielen (Endlos)</button><button data-a="new">Neues Spiel</button></div>';
+        '<div class="row"><button class="main" data-a="resume">Weiterspielen (Endlos)</button><button data-a="title">Hauptmenü</button></div>';
     }
     const card = $("card");
     card.innerHTML = h;
@@ -524,6 +653,7 @@
       if (a === "new") { newGame(); closeOverlay(); }
       else if (a === "load") { if (loadGame()) closeOverlay(); }
       else if (a === "save") { saveGame(true); closeOverlay(); }
+      else if (a === "title") { if (!TT.state.over) saveGame(false); showTitle(); }
       else closeOverlay();
     }));
     ui.overlayOpen = true; ui.overlayKind = kind; ui.drag = null; ui.pan = null;
@@ -547,18 +677,26 @@
     $("b-sound").addEventListener("click", (ev) => {
       TT.muted = !TT.muted; TT.audioOn = true;
       ev.currentTarget.textContent = TT.muted ? "Ton aus" : "Ton an";
+      $("t-sound").textContent = ev.currentTarget.textContent;
       ev.currentTarget.blur();
     });
     $("b-menu").addEventListener("click", (ev) => { openOverlay("menu"); ev.currentTarget.blur(); });
     $("b-call").addEventListener("click", (ev) => { TT.callWave(TT.state); ev.currentTarget.blur(); });
     $("b-view").addEventListener("click", (ev) => { ui.setMode(!ui.mode3d); savePref(); ev.currentTarget.blur(); });
     ui.setMode(readPref() !== "2d");          // 3D ist Standard, sofern der Browser es kann
-    openOverlay("start");
+    bindTitle();
+    showTitle();
   };
 
   ui.frame = function (dt) {
     const s = TT.state, v = ui.view, k = ui.keys;
-    if (!ui.overlayOpen) {
+    if (ui.title) {
+      // langsam um den Herzkern kreisen; Blickziel versetzt, damit der Dungeon rechts neben dem Menü liegt
+      v.yaw += dt * 0.05;
+      const off = window.innerWidth > 760 ? 6 : 0;
+      v.cx = (s.coreIdx % s.W) + 0.5 - Math.cos(v.yaw) * off;
+      v.cy = ((s.coreIdx / s.W) | 0) + 0.5 + Math.sin(v.yaw) * off;
+    } else if (!ui.overlayOpen) {
       const sp = 20 * dt * (36 * ui.dpr / v.zoom);
       const right = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
       const fwd = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);

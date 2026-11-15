@@ -57,6 +57,24 @@
   <div id="info"></div>
   <div id="tip"></div>
   <canvas id="mini" width="180" height="132" title="Übersichtskarte – klicken zum Springen"></canvas>
+  <!-- Hauptmenü: liegt über dem Bild, dahinter läuft ein Beispiel-Dungeon -->
+  <div id="title">
+    <div class="t-panel">
+      <h1>Tiefenthron</h1>
+      <p class="t-tag">Unter der Erde herrscht, wer am tiefsten gräbt.</p>
+      <nav class="t-menu">
+        <button id="t-continue" class="t-btn main"><span>Weiterspielen</span><small id="t-save"></small></button>
+        <button id="t-new" class="t-btn"><span id="t-new-label">Neues Spiel</span><small id="t-new-hint"></small></button>
+        <button id="t-help" class="t-btn"><span>Anleitung &amp; Steuerung</span><small>Worum es geht und wie man spielt</small></button>
+      </nav>
+      <div class="t-opts">
+        <button id="t-view" title="Zwischen 3D- und 2D-Ansicht wechseln">Ansicht: 3D</button>
+        <button id="t-sound" title="Ton an/aus">Ton an</button>
+      </div>
+    </div>
+    <p class="t-credits" id="t-credits"></p>
+  </div>
+
   <div id="overlay"><div id="card"></div></div>
 
   <script src="js/config.js"></script>

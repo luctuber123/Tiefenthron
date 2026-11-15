@@ -83,7 +83,7 @@
   const GAP = { dig: 140, ore: 110, hit: 70, shot: 90, claim: 120, core: 250, eat: 300, alarm: 4000, coin: 150, deny: 200 };
 
   TT.sfx = function (name) {
-    if (!TT.audioOn || TT.muted || !SOUNDS[name]) return;
+    if (!TT.audioOn || TT.muted || TT.quiet || !SOUNDS[name]) return;
     const now = performance.now();
     if (last[name] && now - last[name] < (GAP[name] || 60)) return;
     last[name] = now;

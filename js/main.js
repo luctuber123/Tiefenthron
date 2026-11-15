@@ -39,6 +39,8 @@
         TT.update(TT.state, dt);
         rem -= dt;
       }
+    } else if (ui.title) {
+      TT.update(TT.state, Math.min(0.05, real));      // Beispiel-Dungeon hinter dem Hauptmenü lebt weiter
     }
     if (ui.mode3d) {
       try {
