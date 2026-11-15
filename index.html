@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tiefenthron</title>
+  <link rel="stylesheet" href="css/schrift.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- unten das 3D-Bild, darüber die 2D-Ebene (2D-Ansicht bzw. Balken und Texte in der 3D-Ansicht) -->
+  <canvas id="game3d"></canvas>
+  <canvas id="game"></canvas>
+
+  <header id="topbar">
+    <div class="brand">TIEFENTHRON</div>
+
+    <!-- Reihenfolge = Wichtigkeit: bei schmalem Fenster fällt rechts zuerst weg -->
+    <div id="stats">
+      <div class="stat" id="st-gold" title="Gold / Lagerplatz. Mehr Schatzkammern = mehr Platz.">
+        <i class="ico" data-ic="gold"></i><b id="v-gold">0</b><small id="v-goldcap"></small>
+      </div>
+      <div class="stat" title="Essenz für Zauber. Fließt aus beanspruchtem Boden.">
+        <i class="ico" data-ic="ess"></i><b id="v-ess">0</b><small id="v-esscap"></small>
+      </div>
+      <div class="stat" title="Kämpfer / Schlafplätze · Wühler">
+        <i class="ico" data-ic="horde"></i><b id="v-horde">0</b><small id="v-workers"></small>
+      </div>
+      <div class="stat wide" id="st-wave">
+        <i class="ico" data-ic="raid"></i><span id="v-wave"></span>
+        <button id="b-call" title="Den nächsten Überfall sofort herbeirufen – dafür gibt es Kopfgeld im Voraus.">Jetzt rufen</button>
+      </div>
+      <div class="stat wide" title="Laufende Forschung im Archiv">
+        <i class="ico" data-ic="know"></i><span id="v-research">–</span>
+        <div class="bar"><i id="v-researchbar"></i></div>
+      </div>
+      <div class="stat" title="Bauteile für Türen und Fallen. Entstehen in der Schmiede.">
+        <i class="ico" data-ic="parts"></i><b id="v-parts">0</b>
+      </div>
+      <div class="stat" title="Nächster Zahltag und fälliger Sold">
+        <i class="ico" data-ic="pay"></i><span id="v-pay"></span>
+      </div>
+    </div>
+
+    <div id="ctrl">
+      <button id="b-pause" title="Pause (Leertaste)">Pause</button>
+      <button id="b-speed" title="Spieltempo (F)">1×</button>
+      <button id="b-view" title="Zwischen 3D- und 2D-Ansicht wechseln (V)">Ansicht: 3D</button>
+      <button id="b-sound" title="Ton an/aus">Ton an</button>
+      <button id="b-menu" title="Menü (M)">Menü</button>
+    </div>
+  </header>
+
+  <aside id="tools"></aside>
+  <div id="hint"></div>
+  <div id="log"></div>
+  <div id="info"></div>
+  <div id="tip"></div>
+  <canvas id="mini" width="180" height="132" title="Übersichtskarte – klicken zum Springen"></canvas>
+  <div id="overlay"><div id="card"></div></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/icons.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/render.js"></script>
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/three-addons.js"></script>
+  <!-- eingebettete Kreaturenmodelle (Herkunft und Lizenz: assets/QUELLEN.md) -->
+  <script src="assets/models/orc_blob.js"></script>
+  <script src="assets/models/orc.js"></script>
+  <script src="assets/models/dragon.js"></script>
+  <script src="assets/models/wizard.js"></script>
+  <script src="assets/models/demon.js"></script>
+  <script src="assets/models/ninja.js"></script>
+  <script src="assets/models/ghost.js"></script>
+  <script src="assets/models/rogue.js"></script>
+  <script src="assets/models/rogue_hooded.js"></script>
+  <script src="assets/models/barbarian.js"></script>
+  <script src="assets/models/mage.js"></script>
+  <script src="assets/models/knight.js"></script>
+  <!-- Partikelbilder (Flamme, Rauch, Funkeln) und eingebettete Umgebungsbauteile: Wände, Böden, Möbel -->
+  <script src="assets/fx/partikel.js"></script>
+  <script src="assets/env/dungeon.js"></script>
+  <script src="assets/env/furniture.js"></script>
+  <script src="assets/env/halloween.js"></script>
+  <script src="js/models3d.js"></script>
+  <script src="js/assets3d.js"></script>
+  <script src="js/render3d.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

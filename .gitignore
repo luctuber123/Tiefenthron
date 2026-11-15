@@ -1,0 +1,5 @@
+# Systemdateien, die nicht ins Projekt gehören
+Thumbs.db
+desktop.ini
+.DS_Store
+*.tmp
