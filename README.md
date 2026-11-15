@@ -2,8 +2,18 @@
 
 Ein eigenständiges Dungeon-Management-Spiel im Geist der Klassiker des Genres:
 Du bist der Geist im Herzkern, lässt graben, baust Räume, lockst Kreaturen an
-und wehrst die Helden der Oberwelt ab. Wer zehn Überfälle übersteht und den
-Lichtvogt bezwingt, gewinnt – danach geht es endlos weiter.
+und wehrst die Helden der Oberwelt ab.
+
+Zwei Spielarten stehen im Hauptmenü zur Wahl:
+
+- **Kampagne:** Beginnt mit dem Tutorial „Das Erwachen“, in dem Orm, der Steinflüsterer,
+  Schritt für Schritt erklärt, was zu tun ist (mit Pfeil auf das Ziel und hervorgehobenem
+  Knopf; jederzeit überspringbar). Danach acht Gebiete mit eigener Geschichte, von der Kalten Wiege bis
+  unter den Thron des Lichts. Jedes Gebiet ist größer (48 × 36 bis 104 × 76 Felder),
+  bringt neue Gegner, Räume und Zauber und hat ein Ziel: alle Siegelsteine brechen,
+  dann den Endboss besiegen. Pro Gebiet gibt es bis zu drei Sterne.
+- **Freies Spiel:** Eine Zufallskarte, Überfälle ohne Ende; der Lichtvogt kommt mit
+  dem zehnten Überfall.
 
 Reines HTML5 + JavaScript, keine Installation, keine Bild- oder Modelldateien:
 Karte, Kreaturen und Klänge entstehen zur Laufzeit aus Code.
@@ -17,6 +27,11 @@ Es gibt zwei Ansichten, zwischen denen du jederzeit mit **V** wechselst:
   Quaternius und Kay Lousberg (KayKit), Rahmen und Partikel von Kenney, die Symbole
   von game-icons.net; Herkunft und Lizenzen stehen in `assets/QUELLEN.md`.
 - **2D**: die flache Kartenansicht.
+
+Der Look ist bewusst düster: kaum Grundlicht, Fackeln, Glut und Kristalle als eigentliche
+Lichtquellen, kalter Nebel, dazu eine Nachbearbeitung mit Leuchten, gedämpften Farben,
+Abdunklung zum Rand und feinem Filmkorn. Im Hintergrund läuft eine leise Geräuschkulisse
+aus Grollen und Tropfen. Auf langsamen Rechnern schaltet sich das Leuchten von selbst ab.
 
 ## Starten
 
@@ -56,6 +71,19 @@ Welche Kreaturen kommen, hängt von deinen Räumen ab – die Tooltips in der
 Werkzeugleiste verraten die Bedingungen. Alle 150 Sekunden ist Zahltag;
 unbezahlte, hungrige oder obdachlose Kreaturen werden wütend und gehen.
 
+### Ziele in der Kampagne
+
+6. **Siegelsteine brechen:** Goldene Obelisken, die durch den Nebel schimmern und auf
+   der Übersichtskarte golden blinken. Wachen des Ordens stehen daneben; sie verteidigen
+   ihren Stein, verfolgen aber niemanden weit. Grab einen Gang hin, wirf deine Kämpfer
+   mit dem Griff zu den Wachen, und sobald sie fallen, nehmen die Wühler den Stein ein.
+7. **Endboss:** Sind alle Steine gebrochen, hören die normalen Überfälle auf. Nach
+   20 Sekunden steigt der Boss mit Begleitern durch einen Schacht herab. Fällt er, ist
+   das Gebiet erobert und das nächste wird frei.
+8. **Sterne:** Gebiet erobert · Herzkern nie unter 50 % Leben · schneller als die Zielzeit.
+
+Der Kampagnen-Fortschritt wird im Browser gespeichert, getrennt vom Spielstand.
+
 ## Aufbau des Codes
 
 | Datei | Inhalt |
@@ -63,7 +91,9 @@ unbezahlte, hungrige oder obdachlose Kreaturen werden wütend und gehen.
 | `js/config.js` | Alle Zahlen: Räume, Kreaturen, Zauber, Fallen, Forschung, Balancing |
 | `js/map.js` | Kartenerzeugung, Nebel, Wegfindung |
 | `js/entities.js` | Verhalten von Wühlern, Kämpfern und Eindringlingen |
-| `js/game.js` | Wirtschaft, Forschung, Überfälle, Zauber, Spieleraktionen, Speichern |
+| `js/game.js` | Wirtschaft, Forschung, Überfälle, Siegelsteine und Endboss, Zauber, Spieleraktionen, Speichern |
+| `js/tutorial.js` | Das Tutorial: Gebiet „Das Erwachen“ und Orms elf Schritte |
+| `js/campaign.js` | Die acht Gebiete der Kampagne: Story, Kartengröße, Gegner, Freigaben, Bosse, Fortschritt |
 | `js/render.js` | 2D-Ansicht, Kacheltexturen, Übersichtskarte |
 | `js/models3d.js` | Selbstgebaute 3D-Modelle: Einrichtung, Fallen, Herzkern – und Ersatzfiguren für Kreaturen ohne fertiges Modell |
 | `js/assets3d.js` | Zuordnung Kreatur → fertiges Modell und Animationen (`TT.MODEL_MAP`), Laden und Vorbereiten |
@@ -74,6 +104,7 @@ unbezahlte, hungrige oder obdachlose Kreaturen werden wütend und gehen.
 | `js/icons.js` | Symbole der Oberfläche (game-icons.net, CC BY 3.0) |
 | `css/schrift.css` | Eingebettete Schrift Cinzel |
 | `vendor/three.min.js` | Three.js 0.160 (fremde Bibliothek, unverändert) |
+| `vendor/three-post.js` | Nachbearbeitung von Three.js (Leuchten, Bildausgabe), nur umverpackt – erzeugt mit `tools/make-post.js` |
 | `vendor/three-addons.js` | Modell-Lader von Three.js, nur umverpackt, damit es ohne Webserver läuft |
 | `tools/pack-models.js` | Verkleinert eine `.glb`-Datei und bettet sie ein (siehe `assets/QUELLEN.md`) |
 | `tools/pack-props.js` | Wandelt unbewegte Modelle (Wände, Möbel) in ein kompaktes Format um |
@@ -82,6 +113,8 @@ unbezahlte, hungrige oder obdachlose Kreaturen werden wütend und gehen.
 | `js/audio.js` | Erzeugte Klänge |
 | `js/main.js` | Hauptschleife |
 | `tools/simtest.js` | Schnelltest der Spiellogik: `node tools/simtest.js` |
+| `tools/tutorialtest.js` | Spielt das Tutorial ohne Browser von vorn bis hinten durch |
+| `tools/campaigntest.js` | Prüft alle Kampagnenkarten; mit `--bot` spielt ein Bot jedes Gebiet im Zeitraffer |
 
 Zum Herumprobieren ist `js/config.js` der beste Einstieg: Kosten, Lebenspunkte,
 Überfall-Abstände und Lockbedingungen lassen sich dort direkt ändern.

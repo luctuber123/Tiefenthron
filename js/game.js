@@ -30,15 +30,26 @@
     return put;
   };
 
-  TT.unlocked = function (s, item) { return !item.research || !!s.research.done[item.research]; };
+  // Verfügbar ist, was das Gebiet erlaubt (Kampagne) und was schon erforscht ist
+  TT.unlocked = function (s, item) {
+    const L = TT.levelOf(s);
+    if (L && item.key && L.allow.indexOf(item.key) < 0) return false;
+    return !item.research || !!s.research.done[item.research];
+  };
+  TT.lockReason = function (s, item) {
+    const L = TT.levelOf(s);
+    if (L && item.key && L.allow.indexOf(item.key) < 0) return "In diesem Gebiet noch nicht verfügbar.";
+    if (L && item.research && L.research.indexOf(item.research) < 0 && !s.research.done[item.research]) return "In diesem Gebiet nicht erforschbar.";
+    return "Muss erst im Archiv erforscht werden.";
+  };
 
   TT.countOwn = function (s) {
-    let workers = 0, fighters = 0, foes = 0;
+    let workers = 0, fighters = 0, foes = 0, guards = 0;
     for (const e of s.ents) {
       if (e.dead) continue;
-      if (e.foe) foes++; else if (e.worker) workers++; else fighters++;
+      if (e.foe) { if (e.guard) guards++; else foes++; } else if (e.worker) workers++; else fighters++;
     }
-    return { workers: workers, fighters: fighters, foes: foes };
+    return { workers: workers, fighters: fighters, foes: foes, guards: guards };
   };
 
   /* ---------- Fallen ---------- */
@@ -55,6 +66,7 @@
   TT.hitCore = function (s, dmg) {
     if (s.over) return;
     s.coreHp -= dmg; s.coreHitT = s.time;
+    s.coreLow = Math.min(s.coreLow === undefined ? TT.BAL.coreHp : s.coreLow, Math.max(0, s.coreHp));
     TT.sfx("core");
     if (s.time - s.coreMsgT > 12) {
       s.coreMsgT = s.time;
@@ -69,6 +81,8 @@
 
   /* ---------- Überfälle ---------- */
   function spawnWave(s) {
+    const L = TT.levelOf(s);
+    if (L) { spawnLevelWave(s, L); return; }
     const n = ++s.waveN, C = TT.CREATURES, W = s.W;
     const shaft = s.shafts[s.shaftPick % s.shafts.length];
     const boss = n === 10 || (n > 10 && n % 5 === 0);
@@ -94,6 +108,61 @@
     s.warned = false;
   }
 
+  // Eindringlinge um einen Schacht herum absetzen
+  function drop(s, shaft, list, lvl, hpx) {
+    const C = TT.CREATURES, W = s.W, out = [];
+    list.forEach(function (k, j) {
+      const idx = shaft + ((j % 3) - 1) + ((((j / 3) | 0) % 3) - 1) * W;
+      const e = TT.spawn(s, k, TT.walkable(s, idx) ? idx : shaft, true);
+      e.lvl = lvl; e.hpx = hpx; e.hp = TT.maxHp(s, e); e.think = Math.random();
+      out.push(e);
+      void C;
+    });
+    return out;
+  }
+
+  // Überfälle in der Kampagne: Gegnerarten und Stärke legt das Gebiet fest
+  function spawnLevelWave(s, L) {
+    const n = ++s.waveN, C = TT.CREATURES;
+    const shaft = s.shafts[s.shaftPick % s.shafts.length];
+    let budget = L.budget[0] + n * L.budget[1] + n * n * 0.06;
+    let pool = L.foes.filter(function (k) { return (C[k].from || 1) <= n + Math.max(0, L.index); });
+    if (!pool.length) pool = [L.foes[0]];
+    const list = [];
+    for (let guard = 0; budget >= 1 && guard < 120; guard++) {
+      const k = pool[Math.floor(Math.random() * pool.length)];
+      if (C[k].cost <= budget) { list.push(k); budget -= C[k].cost; }
+    }
+    drop(s, shaft, list, 1 + L.heroLvl + Math.floor((n - 1) / 3), 1 + (n - 1) * 0.05);
+    TT.msg(s, "Überfall " + n + ": " + list.length + " Eindringlinge steigen im " + TT.compass(s, shaft) + " herab!", "bad");
+    TT.sfx("alarm");
+    s.waveT = Math.max(L.waveEvery * 0.55, L.waveEvery - n * 4);
+    s.warned = false;
+  }
+
+  /* ---------- Siegelsteine und Endboss ---------- */
+  TT.sealTaken = function (s, seal) {
+    seal.taken = true;
+    const left = s.seals.filter(function (q) { return !q.taken; }).length;
+    s.fx.push({ k: "ring", x: (seal.idx % s.W) + 0.5, y: ((seal.idx / s.W) | 0) + 0.5, r: 2.5, color: "#b06cff", t: 0.9, d: 0.9 });
+    TT.msg(s, left ? "Ein Siegelstein ist gebrochen! Noch " + left + "." : "Der letzte Siegelstein ist gebrochen!", "good");
+    TT.sfx("spell");
+  };
+
+  function spawnBoss(s, L) {
+    // aus dem Schacht, der am weitesten vom Herzkern entfernt liegt
+    const f = TT.foeField(s);
+    let shaft = s.shafts[0];
+    for (const sh of s.shafts) if (f[sh] < Infinity && (f[shaft] === Infinity || f[sh] > f[shaft])) shaft = sh;
+    const b = L.boss;
+    const boss = drop(s, shaft, [b.type], b.lvl, b.hp)[0];
+    boss.boss = true; boss.name = b.name;
+    drop(s, shaft, b.escort, b.lvl - 1, 1.2);
+    s.bossId = boss.id;
+    TT.msg(s, b.name + " steigt im " + TT.compass(s, shaft) + " herab: " + b.taunt, "bad");
+    TT.sfx("alarm");
+  }
+
   // Spieler ruft den nächsten Überfall vorzeitig herbei und kassiert Bonusgold
   TT.callWave = function (s) {
     if (s.over || s.waveT <= 5) return false;
@@ -115,9 +184,11 @@
     const wt = function (k) { return C[k].weight * (cnt[k] ? 1 : 4); };
     const pool = [];
     let total = 0;
+    const L = TT.levelOf(s);
     for (const k in C) {
       const d = C[k];
       if (d.foe || d.worker || !d.need) continue;
+      if (L && L.creatures.indexOf(k) < 0) continue;
       if (d.max && (cnt[k] || 0) >= d.max) continue;
       let ok = true;
       for (const r in d.need) if (rc[ID[r]] < d.need[r]) ok = false;
@@ -155,7 +226,8 @@
     // Forschung
     const R = s.research;
     if (!R.cur) {
-      for (const r of TT.RESEARCH) if (!R.done[r.key]) { R.cur = r.key; break; }
+      const L = TT.levelOf(s);
+      for (const r of TT.RESEARCH) if (!R.done[r.key] && (!L || L.research.indexOf(r.key) >= 0)) { R.cur = r.key; break; }
     }
     if (R.cur) {
       if (rc[ID.archive] > 0) R.pts += dt * 0.12;         // Staub liest sich fast von selbst
@@ -199,6 +271,19 @@
       TT.sfx("warn");
     }
     if (s.waveT <= 0) spawnWave(s);
+
+    // Kampagne: Sind alle Siegelsteine gebrochen, kommt der Endboss
+    const LV = TT.levelOf(s);
+    if (LV && !s.won) {
+      if (!s.bossPhase && s.seals.length && s.seals.every(function (q) { return q.taken; })) {
+        s.bossPhase = 1; s.bossT = 20; s.waveT = 1e9;      // keine normalen Überfälle mehr
+        TT.msg(s, "Der Fels bebt. Oben sammelt sich das Licht – " + LV.boss.name + " kommt!", "warn");
+        TT.sfx("warn");
+      } else if (s.bossPhase === 1) {
+        s.bossT -= dt;
+        if (s.bossT <= 0) { s.bossPhase = 2; spawnBoss(s, LV); }
+      }
+    }
 
     // Kriegstrommel läuft aus
     if (s.rally) { s.rally.t -= dt; if (s.rally.t <= 0) s.rally = null; }
@@ -428,6 +513,7 @@
   };
   TT.actDrop = function (s, i) {
     if (s.tiles[i] !== T.CLAIMED || i === s.coreIdx) return { ok: false, why: "Absetzen geht nur auf deinem eigenen Boden." };
+    if (s.tut) s.tut.dropped = true;                      // fürs Tutorial: hat schon einmal abgesetzt
     for (let k = s.ents.length - 1; k >= 0; k--) {
       const e = s.ents[k];
       if (!e.held) continue;

@@ -285,7 +285,7 @@
 
   function drawCreature(g, s, e, time, selected) {
     const def = TT.CREATURES[e.type];
-    const sc = (def.boss ? 1.55 : 1) * (1 + (e.lvl - 1) * 0.035);
+    const sc = (def.boss || e.boss ? 1.55 : 1) * (1 + (e.lvl - 1) * 0.035);
     const asleep = e.st === "act" && e.act === "sleep";
     const bob = e.mv ? -Math.abs(Math.sin(time * 11 + e.ph)) * 1.8 : Math.sin(time * 2 + e.ph) * 0.4;
     let rot = 0;
@@ -301,7 +301,7 @@
     g.translate(0, bob);
     g.scale(e.dir * sc, sc);
     if (asleep) g.globalAlpha = 0.72;
-    ART[e.type](g, e, time, rot);
+    ART[def.art || e.type](g, e, time, rot);
     if (e.conv) rect(g, -4.6, 0.4, 9.2, 1.7, "#b06cff");      // Überläufer tragen dein Band
     if (e.hurt > 0) circ(g, 0, 0, 10, "rgba(255,255,255,0.4)");
     g.restore();
@@ -447,6 +447,26 @@
       line(ctx, -5, -10, -5, 8, "#8a6a42", 1.6); line(ctx, 5, -10, 5, 8, "#8a6a42", 1.6);
       for (let k = -8; k <= 6; k += 3.5) line(ctx, -5, k, 5, k, "#8a6a42", 1.3);
     }
+    // Tutorial-Pfeil
+    if (s._tutTarget >= 0) {
+      at((s._tutTarget % W) + 0.5, ((s._tutTarget / W) | 0) + 0.5);
+      const b = Math.abs(Math.sin(time * 3)) * 8;
+      ctx.strokeStyle = "#ffcf5a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(0, 0, 15, 10, 0, 0, TAU); ctx.stroke();
+      poly(ctx, [-8, -26 - b, 8, -26 - b, 0, -12 - b], "#ffcf5a");
+      rect(ctx, -3, -40 - b, 6, 15, "#ffcf5a");
+    }
+    // Siegelsteine: golden, solange der Orden sie hält – violett, sobald sie gebrochen sind
+    for (const seal of s.seals || []) {
+      if (!vis(seal.idx)) continue;
+      at((seal.idx % W) + 0.5, ((seal.idx / W) | 0) + 0.5);
+      const glow = seal.taken ? "#b06cff" : "#ffe9a0";
+      ell(ctx, 0, 10, 11, 4, "rgba(0,0,0,0.45)");
+      ctx.globalAlpha = 0.18 + 0.08 * Math.sin(time * 2.5 + seal.idx); circ(ctx, 0, -4, 15, glow); ctx.globalAlpha = 1;
+      poly(ctx, [-6, 10, -4, -15, 0, -21, 4, -15, 6, 10], seal.taken ? "#2a1c3a" : "#3a3e4c");
+      poly(ctx, [0, -21, 4, -15, 6, 10, 0, 10], "rgba(0,0,0,0.25)");
+      ctx.strokeStyle = glow; ctx.lineWidth = 1.6; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(0, 3); ctx.moveTo(-3, -9); ctx.lineTo(3, -5); ctx.moveTo(3, -2); ctx.lineTo(-3, 2); ctx.stroke();
+    }
     if (vis(s.rift.idx)) {
       const on = s.rift.on;
       at((s.rift.idx % W) + 0.5, ((s.rift.idx / W) | 0) + 0.5);
@@ -486,7 +506,7 @@
       if (!vis(p.idx)) continue;
       at((p.idx % W) + 0.5, ((p.idx / W) | 0) + 0.5);
       ctx.save(); ctx.scale(0.8, 0.8);
-      ART[p.type](ctx, { ph: p.idx, dir: 1, nx: -1, mv: false, carry: 0 }, time, 0);
+      ART[TT.CREATURES[p.type].art || p.type](ctx, { ph: p.idx, dir: 1, nx: -1, mv: false, carry: 0 }, time, 0);
       ctx.restore();
       for (let k = -10; k <= 10; k += 5) rect(ctx, k - 0.7, -13, 1.4, 26, "#8a939e");
       rect(ctx, -11, 12, 22 * Math.min(1, p.t / B.convertTime), 1.6, "#b06cff");
@@ -585,7 +605,7 @@
   // Abdunklung zum Bildrand und roter Alarmschein (wird von beiden Ansichten benutzt)
   TT.drawVignette = function (s, v, ctx, time) {
     const vg = ctx.createRadialGradient(v.w / 2, v.h / 2, Math.min(v.w, v.h) * 0.35, v.w / 2, v.h / 2, Math.max(v.w, v.h) * 0.75);
-    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.75)");
     ctx.fillStyle = vg; ctx.fillRect(0, 0, v.w, v.h);
     if (s._alarm && !s.over) {
       const ag = ctx.createRadialGradient(v.w / 2, v.h / 2, Math.min(v.w, v.h) * 0.45, v.w / 2, v.h / 2, Math.max(v.w, v.h) * 0.7);
@@ -664,9 +684,17 @@
   };
 
   /* ---------- Übersichtskarte ---------- */
+  // Maßstab der Übersichtskarte: die ganze Karte passt hinein, mittig und unverzerrt
+  TT.miniFit = function (s, cw, ch) {
+    const k = Math.min(cw / s.W, ch / s.H);
+    return { k: k, ox: (cw - s.W * k) / 2, oy: (ch - s.H * k) / 2 };
+  };
   TT.drawMini = function (s, v, g, time, poly3d) {
-    const W = s.W, H = s.H, k = g.canvas.width / W;
+    const W = s.W, H = s.H, fit = TT.miniFit(s, g.canvas.width, g.canvas.height), k = fit.k;
+    g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = "#07060b"; g.fillRect(0, 0, g.canvas.width, g.canvas.height);
+    g.setTransform(1, 0, 0, 1, fit.ox, fit.oy);
+    void H;
     const cols = ["#262a40", "#3b2b36", "#e9b93a", "#59f0e0", "#1b151d", "#3c6a78"];
     for (let i = 0; i < s.tiles.length; i++) {
       if (!s.seen[i]) { if (!s.mark[i]) continue; g.fillStyle = "#1f6b62"; }
@@ -679,10 +707,16 @@
     for (const sh of s.shafts) dot(sh, "#ffd98a", 2);
     dot(s.rift.idx, Math.sin(time * 4) > 0 || s.rift.on ? "#b06cff" : "#5a3a8a", 2.5);
     dot(s.coreIdx, "#ffffff", 2.5);
+    if (s._tutTarget >= 0) {
+      g.strokeStyle = "#ffcf5a"; g.lineWidth = 1.5; g.beginPath();
+      g.arc((s._tutTarget % W) * k + k / 2, ((s._tutTarget / W) | 0) * k + k / 2, 5 + 2 * Math.sin(time * 5), 0, Math.PI * 2); g.stroke();
+    }
+    for (const seal of s.seals || []) dot(seal.idx, seal.taken ? "#b06cff" : (Math.sin(time * 3) > -0.3 ? "#ffe9a0" : "#a08a50"), 3);
     for (const e of s.ents) {
       if (e.held) continue;
-      g.fillStyle = e.foe ? "#ff5a3c" : e.worker ? "#e3b889" : "#9ffcf0";
-      g.fillRect(e.x * k - 1, e.y * k - 1, e.foe ? 3 : 2, e.foe ? 3 : 2);
+      g.fillStyle = e.boss ? "#ffcf5a" : e.foe ? (e.guard ? "#c8503c" : "#ff5a3c") : e.worker ? "#e3b889" : "#9ffcf0";
+      const r = e.boss ? 5 : e.foe ? 3 : 2;
+      g.fillRect(e.x * k - r / 2, e.y * k - r / 2, r, r);
     }
     g.strokeStyle = "rgba(255,255,255,0.8)"; g.lineWidth = 1;
     if (poly3d) {
@@ -693,5 +727,6 @@
     } else {
       g.strokeRect((v.cx - v.w / 2 / v.zoom) * k + 0.5, (v.cy - v.h / 2 / v.zoom) * k + 0.5, v.w / v.zoom * k, v.h / v.zoom * k);
     }
+    g.setTransform(1, 0, 0, 1, 0, 0);
   };
 })();

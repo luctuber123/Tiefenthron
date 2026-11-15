@@ -6,7 +6,8 @@
 globalThis.TT = {};
 
 TT.W = 60;   // Kartenbreite in Feldern
-TT.H = 44;   // Kartenhöhe in Feldern
+TT.H = 44;   // Kartenhöhe in Feldern (freies Spiel; die Kampagne legt eigene Größen fest)
+TT.MAXW = 104; TT.MAXH = 76;   // größte Karte der Kampagne – danach richtet sich die 3D-Ansicht
 
 // Feldtypen (alles ab FLOOR ist begehbar)
 TT.T = { ROCK: 0, EARTH: 1, GOLD: 2, GEM: 3, FLOOR: 4, CLAIMED: 5 };
@@ -94,6 +95,13 @@ TT.CREATURES = {
     healer: true, foe: true, cost: 2.5, from: 4, dig: 3.2, loot: 30, shot: "#fff3b0" },
   ritter: { name: "Ritter", hp: 170, speed: 2.0, dmg: 15, range: 1.25, cd: 1.1, foe: true, cost: 3.5, from: 5,
     dig: 2.4, loot: 50 },
+  // art = Aussehen einer anderen Art leihen (2D-Zeichnung und Ersatzfigur in 3D)
+  zwerg: { name: "Erdbrecher", hp: 120, speed: 2.1, dmg: 10, range: 1.25, cd: 1.0, foe: true, cost: 2, from: 1,
+    dig: 0.6, loot: 25, art: "sappeur" },
+  feuermagier: { name: "Flammenruferin", hp: 75, speed: 2.2, dmg: 17, range: 5, cd: 1.9, ranged: true, foe: true,
+    cost: 3, from: 2, dig: 3.0, loot: 40, shot: "#ff7a2c", doorMult: 3, art: "priester" },
+  paladin: { name: "Ordensritter", hp: 260, speed: 1.9, dmg: 17, range: 1.3, cd: 1.1, foe: true, healer: true,
+    cost: 4.5, from: 3, dig: 2.6, loot: 70, art: "ritter" },
   vogt: { name: "Lichtvogt", hp: 2100, speed: 1.9, dmg: 31, range: 1.6, cd: 1.0, foe: true, boss: true,
     cleave: true, cost: 99, dig: 1.2, loot: 500 },
 };

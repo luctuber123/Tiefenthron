@@ -72,9 +72,10 @@
       else b.children[0].style.background = o.color;      // ohne Symboldatei: farbiges Quadrat
       b.children[1].textContent = o.name;
       b.children[3].textContent = o.hot || "";
+      if (o.icon) b.dataset.k = o.icon;
       b.addEventListener("click", () => {
         TT.audioOn = true;
-        if (o.locked && o.locked()) { deny("Noch nicht erforscht – das Archiv arbeitet daran."); return; }
+        if (o.locked && o.locked()) { deny(o.item ? TT.lockReason(TT.state, o.item) : "Noch nicht verfügbar."); return; }
         o.pick();
         b.blur();
       });
@@ -101,21 +102,21 @@
     head("Räume");
     TT.ROOMS.forEach((r) => {
       if (!r) return;
-      add({ name: r.name, hot: r.hot, color: r.color, icon: r.key, desc: r.desc, unit: "Gold pro Feld",
+      add({ name: r.name, hot: r.hot, color: r.color, icon: r.key, item: r, desc: r.desc, unit: "Gold pro Feld",
         cost: () => r.cost, locked: () => !TT.unlocked(TT.state, r), poor: () => TT.state.gold < r.cost,
         active: (t) => t.kind === "room" && t.id === r.id, pick: () => setTool({ kind: "room", id: r.id }) });
     });
 
     head("Türen & Fallen");
     TT.TRAPS.forEach((tr) => {
-      add({ name: tr.name, color: "#c3ccd6", icon: tr.key, desc: tr.desc, unit: "Bauteile", cls: "parts",
+      add({ name: tr.name, color: "#c3ccd6", icon: tr.key, item: tr, desc: tr.desc, unit: "Bauteile", cls: "parts",
         cost: () => tr.parts, locked: () => !TT.unlocked(TT.state, tr), poor: () => TT.state.parts < tr.parts,
         active: (t) => t.kind === "trap" && t.key === tr.key, pick: () => setTool({ kind: "trap", key: tr.key }) });
     });
 
     head("Zauber");
     TT.SPELLS.forEach((sp) => {
-      add({ name: sp.name, color: "#c690ff", icon: sp.key, desc: sp.desc, unit: "Essenz", cls: "ess",
+      add({ name: sp.name, color: "#c690ff", icon: sp.key, item: sp, desc: sp.desc, unit: "Essenz", cls: "ess",
         cost: () => TT.spellCost(TT.state, sp), locked: () => !TT.unlocked(TT.state, sp),
         poor: () => TT.state.ess < TT.spellCost(TT.state, sp),
         active: (t) => t.kind === "spell" && t.key === sp.key,
@@ -133,7 +134,7 @@
     const locked = o.locked && o.locked();
     if (o.cost && o.unit && !locked) h += ' &nbsp;<span class="c">' + o.cost() + " " + o.unit + "</span>";
     h += "<br>" + o.desc;
-    if (locked) h += '<br><span class="l">Muss erst im Archiv erforscht werden.</span>';
+    if (locked) h += '<br><span class="l">' + (o.item ? TT.lockReason(TT.state, o.item) : "Noch nicht verfügbar.") + "</span>";
     tip.innerHTML = h;
     tip.style.display = "block";
     tip.style.top = Math.max(50, Math.min(window.innerHeight - tip.offsetHeight - 8, b.getBoundingClientRect().top)) + "px";
@@ -172,10 +173,54 @@
     setText("v-research", item ? item.name : "Alles erforscht");
     $("v-researchbar").style.width = (item ? Math.min(100, R.pts / item.cost * 100) : 100) + "%";
 
-    setText("v-wave", c.foes ? c.foes + " Eindringlinge im Dungeon!" : "Überfall " + (s.waveN + 1) + " in " + TT.fmtTime(s.waveT));
+    setText("v-wave", c.foes ? c.foes + " Eindringlinge im Dungeon!" : s.waveT > 1e6 ? (s.bossPhase ? "Der Boss naht" : "Kein Überfall in Sicht") : "Überfall " + (s.waveN + 1) + " in " + TT.fmtTime(s.waveT));
     $("st-wave").classList.toggle("alert", c.foes > 0 || s.waveT < 25);
-    $("b-call").style.display = s.waveT > 5 && !c.foes ? "" : "none";
+    $("b-call").style.display = s.waveT > 5 && s.waveT < 1e6 && !c.foes ? "" : "none";
     setText("b-pause", ui.paused ? "Weiter" : "Pause");
+
+    tutorialPanel(s);
+    const g = goalsHtml(s);
+    if (g !== ui.goalsText) { ui.goalsText = g; $("goals").innerHTML = g; }
+    const boss = s.bossId && TT.byId(s, s.bossId);
+    $("bossbar").classList.toggle("show", !!(boss && !boss.dead && ui.started));
+    if (boss && !boss.dead) {
+      setText("b-name", boss.name + " · " + Math.max(0, Math.ceil(boss.hp)) + " / " + TT.maxHp(s, boss));
+      $("b-fill").style.width = Math.max(0, boss.hp / TT.maxHp(s, boss) * 100) + "%";
+    }
+  }
+
+  // Tutorial-Feld oben mittig, dazu Hervorhebung des passenden Knopfs
+  function tutorialPanel(s) {
+    const box = $("tut");
+    const cur = ui.started && !s.won ? TT.tutTick(s, ui) : null;
+    const key = cur ? s.tut.step + "|" + cur.title : "";
+    if (key !== ui.tutKey) {
+      ui.tutKey = key;
+      document.querySelectorAll(".tool.tut-hl").forEach((el) => el.classList.remove("tut-hl"));
+      if (!cur) { box.innerHTML = ""; return; }
+      box.innerHTML = '<p class="tut-k">Tutorial · Schritt ' + (s.tut.step + 1) + " von " + TT.TUT_STEPS.length + '</p><b>' + cur.title + "</b><p>" + cur.text + "</p>" +
+        '<button id="tut-skip">Tutorial überspringen</button>';
+      $("tut-skip").addEventListener("click", () => { saveGame(false); showTitle(); showCamp(); campSel = 0; renderCamp(); });
+      if (cur.hl) { const el = document.querySelector('.tool[data-k="' + cur.hl + '"]'); if (el) el.classList.add("tut-hl"); }
+    }
+  }
+
+  // Zielanzeige oben rechts
+  function goalsHtml(s) {
+    if (!ui.started) return "";
+    const L = TT.levelOf(s);
+    if (!L) {
+      return "<b>Freies Spiel</b>" + (s.won ? '<div class="g done">◆ Lichtvogt bezwungen – endlos weiter</div>'
+        : '<div class="g">◇ Überstehe die Überfälle · der Lichtvogt kommt mit Überfall 10</div>');
+    }
+    const n = s.seals.filter((q) => q.taken).length, all = n === s.seals.length;
+    let h = "<b>" + (L.index < 0 ? "Tutorial" : "Gebiet " + (L.index + 1)) + " · " + L.name + "</b>";
+    h += '<div class="g' + (all ? " done" : "") + '">' + (all ? "◆" : "◇") + " Siegelsteine gebrochen: " + n + " / " + s.seals.length + "</div>";
+    if (s.won) h += '<div class="g done">◆ ' + L.boss.name + " bezwungen</div>";
+    else if (s.bossPhase === 1) h += '<div class="g warn">◇ ' + L.boss.name + " naht … " + TT.fmtTime(s.bossT) + "</div>";
+    else if (s.bossPhase === 2) h += '<div class="g warn">◇ Bezwinge ' + L.boss.name + "</div>";
+    else h += '<div class="g dim">◇ Danach: ' + L.boss.name + " bezwingen</div>";
+    return h;
   }
 
   // Gibt es Markierungen, aber keine einzige grenzt an begehbaren Boden?
@@ -190,7 +235,7 @@
 
   // Der Einflüsterer: sagt dir, was als Nächstes sinnvoll wäre
   function hintFor(s) {
-    if (!ui.started || s.over) return "";
+    if (!ui.started || s.over || s.levelId === "tut") return "";
     const rc = (k) => TT.roomCount(s, k);
     if (ui.paused) return "Pause – du kannst trotzdem in Ruhe markieren und bauen. Leertaste setzt fort.";
     if (unreachableMarks(s)) return "Deine Markierungen grenzen an keinen Gang – die Wühler kommen nicht heran. Markiere durchgehend von deinem Dungeon aus.";
@@ -201,11 +246,17 @@
     if (!rc("treasury")) return "Markiere die glitzernden Goldadern zum Abbau und baue eine Schatzkammer (1), damit das Gold Platz hat.";
     if (s.gold >= TT.goldCap(s)) return "Deine Lager sind voll. Mehr Schatzkammern – oder gib das Gold aus.";
     if (!rc("training")) return "Eine Übungshalle (4) macht aus Raufbolden Kämpfer.";
-    if (!rc("archive")) return "Ein Archiv (5) lockt Flüsterer an. Sie erforschen Zauber, Schmiede und Kerker.";
-    if (s.research.done.forge && !rc("forge")) return "Die Schmiede (6) ist erforscht. Ab 4 Feldern kommen Eisenwänste und fertigen Bauteile für Türen und Fallen.";
-    if (s.research.done.prison && !rc("prison")) return "Der Kerker (7) ist erforscht: Besiegte Eindringlinge laufen dort mit der Zeit zu dir über.";
+    if (!rc("archive") && TT.unlocked(s, TT.ROOMS[TT.ROOM_ID.archive])) return "Ein Archiv (5) lockt Flüsterer an. Sie erforschen Zauber, Schmiede und Kerker.";
+    if (s.research.done.forge && !rc("forge") && TT.unlocked(s, TT.ROOMS[TT.ROOM_ID.forge])) return "Die Schmiede (6) ist erforscht. Ab 4 Feldern kommen Eisenwänste und fertigen Bauteile für Türen und Fallen.";
+    if (s.research.done.prison && !rc("prison") && TT.unlocked(s, TT.ROOMS[TT.ROOM_ID.prison])) return "Der Kerker (7) ist erforscht: Besiegte Eindringlinge laufen dort mit der Zeit zu dir über.";
     if (s.waveN === 0 && s.waveT < 120) return "Die Oberwelt hat dich bemerkt. Halte Kämpfer in der Nähe des Herzkerns – der Zähler oben läuft.";
-    if (s.waveN === 9 && !s.won) return "Der Lichtvogt selbst führt den zehnten Überfall an. Bezwinge ihn, und die Tiefe gehört dir.";
+    const L = TT.levelOf(s);
+    if (L && !s.won) {
+      if (s.bossPhase === 1) return L.boss.name + " steigt gleich herab. Sammle deine Kämpfer am Herzkern – oder wirf sie ihm am Schacht entgegen.";
+      if (s.bossPhase === 2) return "Bezwinge " + L.boss.name + ". Fällt der Boss, ist das Gebiet erobert.";
+      if (TT.countOwn(s).fighters >= 6) return "Siegelsteine (golden auf der Übersichtskarte) werden von Wachen gehalten. Grab einen Gang hin, wirf mit dem Griff (H) Kämpfer zu den Wachen – sind sie besiegt, nehmen deine Wühler den Stein ein.";
+    }
+    if (!L && s.waveN === 9 && !s.won) return "Der Lichtvogt selbst führt den zehnten Überfall an. Bezwinge ihn, und die Tiefe gehört dir.";
     return "";
   }
 
@@ -223,7 +274,7 @@
 
   function creatureInfo(s, e) {
     const def = TT.CREATURES[e.type];
-    let h = "<b>" + def.name + "</b> · Stufe " + e.lvl + (e.conv ? " · Überläufer" : e.foe ? " · Eindringling" : "");
+    let h = "<b>" + (e.name || def.name) + "</b> · Stufe " + e.lvl + (e.conv ? " · Überläufer" : e.boss ? " · Endboss" : e.guard ? " · Wache" : e.foe ? " · Eindringling" : "");
     h += "<br>Leben " + Math.max(0, Math.ceil(e.hp)) + " / " + TT.maxHp(s, e);
     if (!e.foe && !e.worker) {
       h += "<br>Laune " + Math.round(Math.max(0, e.mood)) + " % · Hunger " + Math.round(e.hunger) + " %";
@@ -394,8 +445,9 @@
     }, { passive: false });
 
     const jump = (ev) => {
-      const r = mini.getBoundingClientRect(), s = TT.state;
-      ui.view.cx = (ev.clientX - r.left) / r.width * s.W; ui.view.cy = (ev.clientY - r.top) / r.height * s.H;
+      const r = mini.getBoundingClientRect(), s = TT.state, f = TT.miniFit(s, mini.width, mini.height);
+      const mx = (ev.clientX - r.left) * mini.width / r.width, my = (ev.clientY - r.top) * mini.height / r.height;
+      ui.view.cx = (mx - f.ox) / f.k; ui.view.cy = (my - f.oy) / f.k;
     };
     mini.addEventListener("mousedown", (ev) => { ui.miniDrag = true; jump(ev); });
     mini.addEventListener("mousemove", (ev) => { if (ui.miniDrag && ev.buttons) jump(ev); });
@@ -413,10 +465,14 @@
         else if (ev.code === "Escape" && ui.overlayKind === "help") closeOverlay();
         return;
       }
+      if (ui.title && document.body.classList.contains("camp-mode")) {
+        if (ev.code === "Escape") hideCamp();
+        return;
+      }
       if (ui.title) {                                   // im Hauptmenü: Eingabetaste = oberster Knopf
         if (ev.code === "Enter" || ev.code === "NumpadEnter") {
           ev.preventDefault();
-          ($("t-continue").hidden ? $("t-new") : $("t-continue")).click();
+          ($("t-continue").hidden ? $("t-camp") : $("t-continue")).click();
         }
         return;
       }
@@ -432,7 +488,7 @@
         default:
           if (/^Digit[1-9]$/.test(ev.code)) {
             const r = TT.ROOMS[Number(ev.code.slice(5))];
-            if (r) { if (TT.unlocked(TT.state, r)) setTool({ kind: "room", id: r.id }); else deny("Noch nicht erforscht."); }
+            if (r) { if (TT.unlocked(TT.state, r)) setTool({ kind: "room", id: r.id }); else deny(TT.lockReason(TT.state, r)); }
           }
       }
       if (ev.code.indexOf("Arrow") === 0) ev.preventDefault();
@@ -478,6 +534,28 @@
   function newGame() {
     TT.state = TT.newGame(((Date.now() % 2147483647) ^ Math.floor(Math.random() * 1e9)) >>> 0);
     begin(true);
+  }
+
+  function startCampaign(i) {
+    TT.state = TT.startLevel(i);
+    begin(true);
+    saveGame(false);
+  }
+
+  function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (err) { /* egal */ } }
+
+  // Knopf, der bei vorhandenem Spielstand erst nach einem zweiten Klick auslöst
+  function confirmFirst(btn, labelEl, hintEl, normal, go) {
+    if (readSave() && !btn.dataset.armed) {
+      btn.dataset.armed = "1"; btn.classList.add("confirm");
+      const old = [labelEl.textContent, hintEl.textContent];
+      labelEl.textContent = "Wirklich neu beginnen?";
+      hintEl.textContent = "Nochmal klicken – dein gespeichertes Spiel wird dann überschrieben";
+      setTimeout(() => { delete btn.dataset.armed; btn.classList.remove("confirm"); labelEl.textContent = normal || old[0]; hintEl.textContent = old[1]; }, 5000);
+      return;
+    }
+    delete btn.dataset.armed; btn.classList.remove("confirm");
+    go();
   }
 
   function loadGame() {
@@ -545,10 +623,14 @@
   }
 
   function resetNewButton() {
-    confirmNew = 0;
-    $("t-new").classList.remove("confirm");
-    $("t-new-label").textContent = "Neues Spiel";
-    $("t-new-hint").textContent = readSave() ? "Beginnt auf einer neuen Karte" : "Eine neue Karte, ein neuer Herzkern";
+    const done = TT.CAMPAIGN.filter((L, i) => TT.progress.stars(i) > 0).length;
+    let next = TT.CAMPAIGN.findIndex((L, i) => TT.progress.open(i) && !TT.progress.stars(i));
+    if (next < 0) next = TT.CAMPAIGN.length - 1;
+    $("t-camp-hint").textContent = !done && !TT.progress.stars(-1) ? "Beginnt mit dem Tutorial „" + TT.TUTORIAL.name + "“"
+      : done >= TT.CAMPAIGN.length ? "Alle " + done + " Gebiete erobert – Sterne sammeln"
+      : "Gebiet " + (next + 1) + ": " + TT.CAMPAIGN[next].name + " · " + done + " von " + TT.CAMPAIGN.length + " erobert";
+    $("t-free-label").textContent = "Freies Spiel";
+    $("t-free-hint").textContent = "Zufällige Karte, Überfälle ohne Ende";
   }
 
   function refreshTitle() {
@@ -557,7 +639,9 @@
     if (txt) {
       try {
         const s = TT.deserialize(txt), c = TT.countOwn(s);
-        info = (s.over ? "Herzkern zerbrochen" : "Überfall " + (s.waveN + 1) + " steht bevor") + " · " +
+        const L = TT.levelOf(s);
+        info = (L ? (L.index < 0 ? "Tutorial" : "Gebiet " + (L.index + 1)) + ": " + L.name : "Freies Spiel") + " · " +
+          (s.over ? "Herzkern zerbrochen" : s.won ? "erobert" : L ? s.seals.filter((q) => q.taken).length + "/" + s.seals.length + " Siegel" : "Überfall " + (s.waveN + 1)) + " · " +
           c.fighters + " Kreaturen · " + TT.fmtTime(s.time) + " gespielt" + (s.savedAt ? " · " + ago(s.savedAt) : "");
       } catch (err) { info = ""; }
     }
@@ -589,21 +673,106 @@
       TT.audioOn = true;
       if (!loadGame()) $("t-save").textContent = "Der Spielstand ließ sich nicht laden.";
     });
-    $("t-new").addEventListener("click", () => {
+    $("t-camp").addEventListener("click", () => { TT.audioOn = true; showCamp(); });
+    $("t-free").addEventListener("click", () => {
       TT.audioOn = true;
-      // Gibt es einen Spielstand, muss der Neustart bestätigt werden – das automatische Speichern überschreibt ihn sonst
-      if (readSave() && !confirmNew) {
-        confirmNew = setTimeout(resetNewButton, 5000);
-        $("t-new").classList.add("confirm");
-        $("t-new-label").textContent = "Wirklich neu beginnen?";
-        $("t-new-hint").textContent = "Nochmal klicken – dein gespeichertes Spiel wird dann überschrieben";
-        return;
-      }
-      newGame();
+      confirmFirst($("t-free"), $("t-free-label"), $("t-free-hint"), "Freies Spiel", newGame);
     });
+    $("c-back").addEventListener("click", hideCamp);
     $("t-help").addEventListener("click", () => { TT.audioOn = true; openOverlay("help"); });
     $("t-view").addEventListener("click", (ev) => { ui.setMode(!ui.mode3d); savePref(); ev.currentTarget.blur(); });
     $("t-sound").addEventListener("click", (ev) => { $("b-sound").click(); ev.currentTarget.blur(); });
+  }
+
+  /* ---------- Kampagnenkarte ---------- */
+  let campSel = 0;
+  const nameOf = (key) => {
+    const r = TT.ROOMS.find((q) => q && q.key === key) || TT.SPELLS.find((q) => q.key === key) || TT.TRAPS.find((q) => q.key === key);
+    return r ? r.name : key;
+  };
+  const starStr = (n) => "★".repeat(n) + "☆".repeat(3 - n);
+
+  function showCamp() {
+    document.body.classList.add("camp-mode");
+    let next = TT.CAMPAIGN.findIndex((L, i) => TT.progress.open(i) && !TT.progress.stars(i));
+    campSel = next < 0 ? TT.CAMPAIGN.length - 1 : next;
+    if (next === 0 && !TT.progress.stars(0) && !TT.progress.stars(-1)) campSel = -1;
+    renderCamp();
+  }
+  function hideCamp() { document.body.classList.remove("camp-mode"); refreshTitle(); }
+
+  function renderCamp() {
+    const svg = $("c-svg"), L = TT.CAMPAIGN;
+    let h = '<defs><linearGradient id="c-sky" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#140a22"/><stop offset="0.75" stop-color="#1a1424"/>' +
+      '<stop offset="1" stop-color="#3a2a1c"/></linearGradient></defs><rect x="0" y="0" width="100" height="100" fill="url(#c-sky)"/>';
+    // Gesteinsschichten
+    for (let k = 1; k < 8; k++) h += '<path d="M0 ' + (100 - k * 11.5) + ' Q 25 ' + (98 - k * 11.5 + (k % 2 ? 2 : -2)) + " 50 " + (100 - k * 11.5) + " T 100 " + (100 - k * 11.5) + '" class="c-layer"/>';
+    h += '<text x="50" y="3.6" class="c-top">Oberwelt</text>';
+    for (let i = 1; i < L.length; i++) {
+      const a = L[i - 1], b = L[i];
+      h += '<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" class="c-path' + (TT.progress.open(i) ? " open" : "") + '"/>';
+    }
+    // Tutorial: kleiner Knoten unterhalb des ersten Gebiets
+    const tut = TT.TUTORIAL, tst = TT.progress.stars(-1);
+    h += '<line x1="' + tut.x + '" y1="' + tut.y + '" x2="' + L[0].x + '" y2="' + L[0].y + '" class="c-path open"/>' +
+      '<g class="c-node tut' + (tst ? " done" : " open") + (campSel === -1 ? " sel" : "") + '" data-i="-1" tabindex="0"><circle cx="' + tut.x + '" cy="' + tut.y + '" r="2.4"/>' +
+      '<text x="' + tut.x + '" y="' + (tut.y + 0.9) + '" class="c-num">T</text><text x="' + (tut.x + 3.6) + '" y="' + (tut.y + 0.9) + '" class="c-name c-left">Tutorial</text></g>';
+    L.forEach((q, i) => {
+      const open = TT.progress.open(i), st = TT.progress.stars(i);
+      const cls = "c-node" + (st ? " done" : open ? " open" : " locked") + (i === campSel ? " sel" : "");
+      h += '<g class="' + cls + '" data-i="' + i + '" tabindex="0"><circle cx="' + q.x + '" cy="' + q.y + '" r="3.4"/>' +
+        '<text x="' + q.x + '" y="' + (q.y + 1.3) + '" class="c-num">' + (i + 1) + "</text>" +
+        '<text x="' + q.x + '" y="' + (q.y + 6.6) + '" class="c-name">' + q.name + "</text>" +
+        (st ? '<text x="' + q.x + '" y="' + (q.y - 4.6) + '" class="c-stars">' + starStr(st) + "</text>" : "") + "</g>";
+    });
+    svg.innerHTML = h;
+    svg.querySelectorAll(".c-node").forEach((g) => g.addEventListener("click", () => { campSel = Number(g.dataset.i); renderCamp(); }));
+    renderBrief(campSel);
+  }
+
+  function renderBrief(i) {
+    if (i < 0) { renderTutorialBrief(); return; }
+    const L = TT.CAMPAIGN[i], prev = TT.CAMPAIGN[i - 1], open = TT.progress.open(i), st = TT.progress.stars(i);
+    const isNew = (k) => !prev || prev.allow.indexOf(k) < 0;
+    // Neues aus diesem Gebiet; was erst im Archiv erforscht werden muss, ist entsprechend markiert
+    const unlocks = L.allow.filter(isNew).map((k) => nameOf(k) + (L.research.indexOf(k) >= 0 ? " (im Archiv erforschbar)" : ""))
+      .concat(L.research.filter((k) => L.allow.indexOf(k) < 0).map((k) => (TT.RESEARCH.find((r) => r.key === k) || { name: k }).name + " (im Archiv erforschbar)"));
+    const newFoes = L.foes.filter((k) => !prev || prev.foes.indexOf(k) < 0).map((k) => TT.CREATURES[k].name);
+    let h = '<p class="c-kicker">Gebiet ' + (i + 1) + " von " + TT.CAMPAIGN.length + (st ? " · " + starStr(st) : "") + "</p><h2>" + L.name + "</h2>";
+    h += L.intro.map((p) => "<p>" + p + "</p>").join("");
+    h += "<h3>Ziele</h3><ul><li>Brich alle <b>" + L.seals + " Siegelsteine</b> – goldene Obelisken, bewacht von Kriegern des Ordens.</li>" +
+      "<li>Danach steigt <b>" + L.boss.name + "</b> herab. Bezwinge den Boss, und das Gebiet ist erobert.</li>" +
+      "<li>Halte den Herzkern am Leben.</li></ul>";
+    h += '<h3>Sterne</h3><ul class="c-st"><li>Gebiet erobert</li><li>Herzkern nie unter 50 % Leben</li><li>Schneller als ' + Math.round(L.par / 60) + " Minuten</li></ul>";
+    h += "<h3>Lage</h3><p class=\"c-facts\">Karte " + L.W + " × " + L.H + " Felder · " + L.shafts + " Schächte zur Oberwelt · erster Überfall nach etwa " +
+      Math.round(L.firstWave / 60) + " Minuten</p>";
+    if (unlocks.length) h += '<p class="c-facts"><b>Neu verfügbar:</b> ' + unlocks.join(", ") + "</p>";
+    if (newFoes.length) h += '<p class="c-facts"><b>' + (prev ? "Neue Gegner" : "Gegner") + ":</b> " + newFoes.join(", ") + "</p>";
+    h += open ? '<button class="t-btn main c-go" id="c-go"><span id="c-go-label">' + (st ? "Erneut spielen" : "Gebiet betreten") + '</span><small id="c-go-hint">' +
+        (st ? "Bestes Ergebnis: " + starStr(st) : "Die Einsatzbesprechung ist vorbei") + "</small></button>"
+      : '<p class="c-locked">Gesperrt – erobere zuerst „' + prev.name + "“.</p>";
+    $("c-brief").innerHTML = h;
+    const go = $("c-go");
+    if (go) go.addEventListener("click", () => {
+      TT.audioOn = true;
+      confirmFirst(go, $("c-go-label"), $("c-go-hint"), "", () => { document.body.classList.remove("camp-mode"); startCampaign(i); });
+    });
+  }
+
+  function renderTutorialBrief() {
+    const L = TT.TUTORIAL, st = TT.progress.stars(-1);
+    let h = '<p class="c-kicker">Tutorial' + (st ? " · abgeschlossen" : "") + "</p><h2>" + L.name + "</h2>" + L.intro.map((p) => "<p>" + p + "</p>").join("");
+    h += "<h3>Was du lernst</h3><ul><li>Kamera, Graben und Boden beanspruchen</li><li>Den Riss erobern, Schlafhöhle, Pilzgarten und Schatzkammer bauen</li>" +
+      "<li>Kreaturen mit dem Griff tragen</li><li>Einen Spähtrupp abwehren</li><li>Einen Siegelstein brechen und den Späherführer besiegen</li></ul>";
+    h += '<p class="c-facts">Kleine Karte, 40 × 30 Felder · etwa 15 Minuten · Orm erklärt jeden Schritt</p>';
+    h += '<button class="t-btn main c-go" id="c-go"><span id="c-go-label">' + (st ? "Tutorial wiederholen" : "Tutorial starten") +
+      '</span><small id="c-go-hint">Wer das Spiel kennt, kann direkt mit Gebiet 1 beginnen</small></button>';
+    $("c-brief").innerHTML = h;
+    const go = $("c-go");
+    go.addEventListener("click", () => {
+      TT.audioOn = true;
+      confirmFirst(go, $("c-go-label"), $("c-go-hint"), "", () => { document.body.classList.remove("camp-mode"); startCampaign(-1); });
+    });
   }
 
   /* ---------- Menüs ---------- */
@@ -631,11 +800,26 @@
     if (kind === "help") {
       h = "<h2>Anleitung</h2>" +
         "<p>Du bist der Geist im Herzkern. Lass graben, baue Räume, locke Kreaturen durch den Riss – und halte die " +
-        "Helden der Oberwelt von deinem Kern fern. Wer zehn Überfälle übersteht und den Lichtvogt bezwingt, dem gehört die Tiefe.</p>" +
+        "Helden der Oberwelt von deinem Kern fern.</p>" +
+        "<p><b>Kampagne:</b> Acht Gebiete, jedes größer und härter. In jedem halten Wachen des Ordens Siegelsteine. Grab dich zu ihnen durch, " +
+        "wirf deine Kämpfer mit dem Griff zu den Wachen und lass die Wühler die Steine einnehmen. Sind alle gebrochen, steigt der Endboss des Gebiets herab.</p>" +
+        "<p><b>Freies Spiel:</b> Eine Zufallskarte ohne Ziel außer Überleben – der Lichtvogt kommt mit dem zehnten Überfall.</p>" +
         HELP + '<div class="row"><button class="main" data-a="back">Zurück</button></div>' + CREDITS;
     } else if (kind === "menu") {
       h = "<h2>Pause</h2>" + HELP + '<div class="row"><button class="main" data-a="resume">Weiter</button>' +
         '<button data-a="save">Speichern</button><button data-a="title">Hauptmenü</button></div>' + CREDITS;
+    } else if (kind === "over" && TT.levelOf(s)) {
+      const L = TT.levelOf(s);
+      h = '<h2 class="bad">Gebiet verloren</h2><p>Der Herzkern zerspringt. Orm flüstert: „Noch einmal. Der Fels vergisst nicht, aber er vergibt.“</p>' + stats +
+        '<div class="row"><button class="main" data-a="retry">Erneut versuchen</button><button data-a="camp">Zur Kampagnenkarte</button>' +
+        '<button data-a="title">Hauptmenü</button></div>';
+      void L;
+    } else if (kind === "won" && TT.levelOf(s)) {
+      const L = TT.levelOf(s), st = TT.starsFor(s), last = L.index === TT.CAMPAIGN.length - 1;
+      h = "<h2>" + (last ? "Die Tiefe ist frei" : L.index < 0 ? "Tutorial geschafft" : "Gebiet erobert") + "</h2><p>" + L.outro + "</p>" +
+        '<p class="c-starline">' + starStr(st.n) + "</p><ul>" + st.list.map((q) => '<li class="' + (q.ok ? "ok" : "no") + '">' + (q.ok ? "★ " : "☆ ") + q.text + "</li>").join("") + "</ul>" +
+        stats + '<div class="row">' + (last ? "" : '<button class="main" data-a="next">Weiter: ' + TT.CAMPAIGN[L.index + 1].name + "</button>") +
+        '<button' + (last ? ' class="main"' : "") + ' data-a="camp">Zur Kampagnenkarte</button><button data-a="resume">Hier weiterspielen</button></div>';
     } else if (kind === "over") {
       h = '<h2 class="bad">Der Herzkern ist zerbrochen</h2><p>Das Licht der Oberwelt flutet deine Gänge. Die Horde zerstreut sich, ' +
         "der Riss fällt in sich zusammen.</p>" + stats +
@@ -653,7 +837,10 @@
       if (a === "new") { newGame(); closeOverlay(); }
       else if (a === "load") { if (loadGame()) closeOverlay(); }
       else if (a === "save") { saveGame(true); closeOverlay(); }
-      else if (a === "title") { if (!TT.state.over) saveGame(false); showTitle(); }
+      else if (a === "title") { if (!TT.state.over && !(TT.state.won && TT.levelOf(TT.state))) saveGame(false); showTitle(); }
+      else if (a === "retry") { const L = TT.levelOf(TT.state); closeOverlay(); startCampaign(L.index); }
+      else if (a === "next") { const L = TT.levelOf(TT.state); clearSave(); closeOverlay(); showTitle(); showCamp(); campSel = L.index + 1; renderCamp(); }
+      else if (a === "camp") { if (TT.state.won) clearSave(); showTitle(); showCamp(); }
       else closeOverlay();
     }));
     ui.overlayOpen = true; ui.overlayKind = kind; ui.drag = null; ui.pan = null;
@@ -721,7 +908,12 @@
 
     if (ui.started && !ui.overlayOpen) {
       if (s.over && !ui.endShown) { ui.endShown = true; openOverlay("over"); }
-      else if (s.won && !s.wonShown) { s.wonShown = true; TT.sfx("win"); openOverlay("won"); }
+      else if (s.won && !s.wonShown) {
+        s.wonShown = true; TT.sfx("win");
+        const L = TT.levelOf(s);
+        if (L) TT.progress.complete(L.index, TT.starsFor(s).n);
+        openOverlay("won");
+      }
       ui.saveT += dt;
       if (ui.saveT > 60 && !s.over) { ui.saveT = 0; saveGame(false); }
     }

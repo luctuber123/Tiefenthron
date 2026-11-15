@@ -31,6 +31,7 @@
     const real = Math.min(0.1, Math.max(0, (now - last) / 1000));
     last = now;
     ui.frame(real);
+    if (TT.ambientTick) TT.ambientTick(real);
     if (ui.started && !ui.paused && !ui.overlayOpen) {
       // Zeit in kleinen Schritten vorspulen, damit auch bei 3× nichts durch Wände rutscht
       let rem = real * ui.speed;

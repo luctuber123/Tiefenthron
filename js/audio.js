@@ -82,6 +82,46 @@
   // Mindestabstand in Millisekunden, damit nichts knattert
   const GAP = { dig: 140, ore: 110, hit: 70, shot: 90, claim: 120, core: 250, eat: 300, alarm: 4000, coin: 150, deny: 200 };
 
+  /* Geräuschkulisse: tiefes Grollen der Erde, ab und zu ein Tropfen, selten ein fernes Beben.
+     Läuft leise im Hintergrund, sobald der Ton erlaubt ist (erster Klick) und nicht stummgeschaltet. */
+  let amb = null, dripT = 3, rumbleT = 25;
+  function startAmbient() {
+    const a = ctx();
+    if (!a || amb) return;
+    if (!noiseBuf) {
+      noiseBuf = a.createBuffer(1, a.sampleRate, a.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain(), lfo = a.createOscillator(), lg = a.createGain();
+    src.buffer = noiseBuf; src.loop = true;
+    f.type = "lowpass"; f.frequency.value = 140;
+    g.gain.value = 0;
+    lfo.frequency.value = 0.07; lg.gain.value = 40;            // der Klang atmet langsam
+    lfo.connect(lg); lg.connect(f.frequency);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(); lfo.start();
+    amb = { g: g };
+  }
+  function drip() {
+    const a = ctx(); if (!a) return;
+    const o = a.createOscillator(), g = a.createGain(), t = a.currentTime, f0 = 900 + Math.random() * 700;
+    o.type = "sine"; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 0.45, t + 0.12);
+    g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.2);
+  }
+  TT.ambientTick = function (dt) {
+    if (!TT.audioOn) return;
+    startAmbient();
+    if (!amb) return;
+    const want = TT.muted ? 0 : 0.22;
+    amb.g.gain.value += (want - amb.g.gain.value) * Math.min(1, dt * 2);
+    if (TT.muted) return;
+    dripT -= dt; rumbleT -= dt;
+    if (dripT <= 0) { dripT = 2 + Math.random() * 6; drip(); }
+    if (rumbleT <= 0) { rumbleT = 25 + Math.random() * 35; noise(1.8, 0.35, 70); }
+  };
+
   TT.sfx = function (name) {
     if (!TT.audioOn || TT.muted || TT.quiet || !SOUNDS[name]) return;
     const now = performance.now();

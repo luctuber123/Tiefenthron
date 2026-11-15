@@ -13,9 +13,9 @@
   let frame = 0, pxScale = 1000, camDist = 20, spots = [], goldTiles = [], lightSpots = [], torches = [], flames = [];
   // Wo Kreaturen stehen, die sich ein Feld teilen (damit sie nicht ineinander stecken)
   const SLOTS = [[0, 0], [0.27, 0.1], [-0.27, 0.1], [0.08, -0.28], [-0.13, 0.3], [0.3, -0.2], [-0.3, -0.18]];
-  let coreGrp, crystal, riftGrp, riftRings = [], riftOn = null, shaftObjs = [], banner, selRing, spellRing, spellDisc;
+  let tutArrow = null, coreGrp, crystal, riftGrp, riftRings = [], riftOn = null, shaftObjs = [], sealObjs = [], banner, selRing, spellRing, spellDisc;
   let glowPts, dustPts, parts = [], rings = [], bolts = [], prisoners = [];
-  let rq = 0, slow = 0;                  // Renderqualität (1 = volle Auflösung) und Zähler für zu langsame Bilder
+  let rq = 0, slow = 0, composer = null, bloom = null, grade = null, postW = 0, postH = 0;                  // Renderqualität (1 = volle Auflösung) und Zähler für zu langsame Bilder
   const ents = new Map();
 
   const _mat4 = new THREE.Matrix4(), _pos = new THREE.Vector3(), _quat = new THREE.Quaternion(), _scl = new THREE.Vector3(),
@@ -176,11 +176,11 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.3;
+    renderer.toneMappingExposure = 1.05;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x06050a);
-    scene.fog = new THREE.FogExp2(0x06050a, 0.015);
+    scene.background = new THREE.Color(0x030205);
+    scene.fog = new THREE.FogExp2(0x05060c, 0.02);            // kalter, fast schwarzer Nebel
     camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 240);
 
     // Umgebungslicht fürs Glänzen von Gold, Rüstungen und Kristallen
@@ -197,15 +197,51 @@
     pm.dispose();
 
     // Licht: weiches Grundlicht, ein schräges Hauptlicht mit Schatten, dazu einige Punktlichter
-    hemi = new THREE.HemisphereLight(0xa8b4ff, 0x40304a, 2.2);
+    // Kaum Grundlicht: Fackeln, Glut, Kristalle und der Herzkern sind die eigentlichen Lichtquellen
+    hemi = new THREE.HemisphereLight(0x5a6a9a, 0x1a1020, 0.5);
     scene.add(hemi);
-    sun = new THREE.DirectionalLight(0xfff1dc, 3.3);
+    sun = new THREE.DirectionalLight(0x8fa0d8, 0.6);         // ein Hauch kaltes Licht von oben, nur für Schatten und Kanten
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
     sun.shadow.camera.near = 1; sun.shadow.camera.far = 120;
     scene.add(sun); scene.add(sun.target);
-    for (let k = 0; k < 6; k++) { const l = new THREE.PointLight(0xffffff, 0, 9, 2); l.position.set(0, -50, 0); scene.add(l); lights.push(l); }
+    for (let k = 0; k < 12; k++) { const l = new THREE.PointLight(0xffffff, 0, 9, 2); l.position.set(0, -50, 0); scene.add(l); lights.push(l); }
+
+    /* Nachbearbeitung: Leuchten um helle Stellen, danach Farbstimmung, Randabdunklung und Filmkorn */
+    if (THREE.EffectComposer && THREE.UnrealBloomPass && THREE.OutputPass) {
+      try {
+        composer = new THREE.EffectComposer(renderer);
+        composer.setPixelRatio(1);
+        composer.addPass(new THREE.RenderPass(scene, camera));
+        bloom = new THREE.UnrealBloomPass(new THREE.Vector2(512, 512), 0.6, 0.5, 0.8);
+        composer.addPass(bloom);
+        composer.addPass(new THREE.OutputPass());
+        grade = new THREE.ShaderPass({
+          uniforms: { tDiffuse: { value: null }, time: { value: 0 }, alarm: { value: 0 }, aspect: { value: 1 } },
+          vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+          fragmentShader: [
+            "uniform sampler2D tDiffuse; uniform float time; uniform float alarm; uniform float aspect; varying vec2 vUv;",
+            "void main() {",
+            "  vec3 c = texture2D(tDiffuse, vUv).rgb;",
+            "  float l = dot(c, vec3(0.299, 0.587, 0.114));",
+            "  c = mix(vec3(l), c, 0.74);                                          // gedämpfte Farben",
+            "  c = (c - 0.5) * 1.1 + 0.5;                                          // etwas mehr Kontrast",
+            "  c += vec3(-0.012, -0.004, 0.02) * (1.0 - smoothstep(0.0, 0.35, l));    // kühle Schatten",
+            "  c *= mix(vec3(1.0), vec3(1.08, 0.98, 0.86), smoothstep(0.35, 1.0, l)); // warme Lichter",
+            "  vec2 q = (vUv - 0.5) * vec2(aspect, 1.0);",
+            "  float d = length(q);",
+            "  c *= 1.0 - smoothstep(0.38, 0.95, d) * 0.78;                        // Abdunklung zum Rand",
+            "  c = mix(c, c * vec3(1.35, 0.55, 0.5) + vec3(0.06, 0.0, 0.0), alarm * smoothstep(0.35, 0.85, d));",
+            "  float n = fract(sin(dot(vUv * 913.7 + time * 7.1, vec2(12.9898, 78.233))) * 43758.5453);",
+            "  c += (n - 0.5) * 0.04;                                              // Filmkorn",
+            "  gl_FragColor = vec4(max(c, 0.0), 1.0);",
+            "}",
+          ].join("\n"),
+        });
+        composer.addPass(grade);
+      } catch (err) { console.warn("Nachbearbeitung nicht verfügbar:", err); composer = null; }
+    }
 
     /* --- Materialien --- */
     mat.lit = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.06, envMapIntensity: 0.55 });
@@ -237,7 +273,7 @@
       return new THREE.MeshStandardMaterial({ map: tex(c), roughness: rough, metalness: 0.02, envMapIntensity: 0.45 });
     };
 
-    const n = TT.W * TT.H;
+    const n = TT.MAXW * TT.MAXH;          // Platz für die größte Karte der Kampagne
     const box = new THREE.BoxGeometry(1, 1, 1); box.translate(0, 0.5, 0);
     const plane = new THREE.PlaneGeometry(1, 1); plane.rotateX(-PI / 2);
 
@@ -306,6 +342,15 @@
       riftGrp.add(r); riftRings.push(r);
     }
     scene.add(riftGrp);
+
+    // Tutorial-Pfeil: zeigt von oben auf das nächste Ziel
+    tutArrow = new THREE.Group();
+    const am = new THREE.MeshBasicMaterial({ color: 0xffcf5a, toneMapped: false });
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 4), am); cone.rotation.x = PI; tutArrow.add(cone);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 6), am); stem.position.y = 0.45; tutArrow.add(stem);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.38, 0.46, 32), new THREE.MeshBasicMaterial({ color: 0xffcf5a, toneMapped: false, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -PI / 2; ring.name = "ring"; tutArrow.add(ring);
+    tutArrow.visible = false; scene.add(tutArrow);
 
     // Kriegstrommel-Banner, Auswahlring, Zauberkreis
     banner = new THREE.Mesh(P("banner").lit, mat.lit); banner.castShadow = true; banner.visible = false; scene.add(banner);
@@ -398,16 +443,16 @@
     if (!perFrame) ENVSET.push(key);
   }
   function buildEnv() {
-    const n = TT.W * TT.H;
-    envMesh("fTile", "floor_tile_small", n, false); envMesh("fBrokA", "floor_tile_small_broken_A", 600, false);
-    envMesh("fBrokB", "floor_tile_small_broken_B", 600, false); envMesh("fWeeds", "floor_tile_small_weeds_A", 400, false);
+    const n = TT.MAXW * TT.MAXH;          // Platz für die größte Karte der Kampagne
+    envMesh("fTile", "floor_tile_small", n, false); envMesh("fBrokA", "floor_tile_small_broken_A", 1600, false);
+    envMesh("fBrokB", "floor_tile_small_broken_B", 1600, false); envMesh("fWeeds", "floor_tile_small_weeds_A", 1200, false);
     envMesh("fDirt0", "floor_dirt_small_A", n, false); envMesh("fDirt1", "floor_dirt_small_B", n, false);
     envMesh("fDirt2", "floor_dirt_small_C", n, false); envMesh("fDirt3", "floor_dirt_small_D", n, false);
     envMesh("fWood", "floor_wood_small", 900, false); envMesh("fWoodD", "floor_wood_small_dark", 1500, false);
-    envMesh("wall", "wall", 2600, true); envMesh("wCrack", "wall_cracked", 400, true);
+    envMesh("wall", "wall", 6000, true); envMesh("wCrack", "wall_cracked", 900, true);
     envMesh("wGate", "wall_gated", 400, true); envMesh("wShelf", "wall_shelves", 400, true);
-    envMesh("pillar", "pillar", 1600, true);
-    envMesh("torchM", "torch_mounted", 700, false); envMesh("banner", "banner_patternB_blue", 400, false);
+    envMesh("pillar", "pillar", 3500, true);
+    envMesh("torchM", "torch_mounted", 1600, false); envMesh("banner", "banner_patternB_blue", 900, false);
     envMesh("swordShield", "sword_shield", 300, false);
     envMesh("coinS", "coin_stack_small", 1800, true); envMesh("coinM", "coin_stack_medium", 1800, true); envMesh("coinL", "coin_stack_large", 900, true);
     envMesh("chestG", "chest_gold", 300, true); envMesh("chestGLid", "chest_gold#chest_gold_lid", 300, true);
@@ -717,7 +762,7 @@
     o.px = px; o.pz = pz;
     o.walk += ((moving ? 1 : 0) - o.walk) * Math.min(1, dt * 10);
 
-    const sc = (def.boss ? 1.55 : 1) * (1 + (e.lvl - 1) * 0.035);
+    const sc = (def.boss || e.boss ? 1.55 : 1) * (1 + (e.lvl - 1) * 0.035);
     const asleep = e.st === "act" && e.act === "sleep";
     const working = (e.worker && e.st === "work" && e.job && e.job.kind !== "deliver") || digging;
     const busy = !e.foe && e.st === "act" && (e.act === "train" || e.act === "forge" || e.act === "research");
@@ -765,6 +810,7 @@
         emit(false, e.x + (tx - e.x) * 0.55, 0.3 + Math.random() * 0.4, e.y + (tz - e.y) * 0.55, (e.x - tx) + (Math.random() - 0.5), 1 + Math.random(), (e.y - tz) + (Math.random() - 0.5), 0.5, 0.11, rgb("#5b4653"), 7);
       }
       if (e.haste > 0 && moving) emit(true, px, 0.15, pz, 0, 0.3, 0, 0.4, 0.22, rgb("#ffe36e"), 0);
+      if (e.boss) emit(true, px + (Math.random() - 0.5) * 0.7, 0.15, pz + (Math.random() - 0.5) * 0.7, 0, 0.9, 0, 1.1, 0.3, [1, 0.85, 0.45], -0.2, STAR, 0.9);
       if (e.type === "nachtmahr") emit(false, px + (Math.random() - 0.5) * 0.4, 0.15, pz + (Math.random() - 0.5) * 0.4, 0, 0.35, 0, 0.8, 0.3, rgb("#1c1030"), 0);
     }
   }
@@ -807,6 +853,26 @@
     if (Math.random() < dt * 6) emit(true, coreGrp.position.x + (Math.random() - 0.5) * 0.7, 0.3, coreGrp.position.z + (Math.random() - 0.5) * 0.7, 0, 0.5 + Math.random() * 0.4, 0, 1.6, 0.12, C_TEAL, -0.2);
 
     // Riss
+    // Siegelsteine
+    const seals = s.seals || [];
+    while (sealObjs.length < seals.length) {
+      const g = new THREE.Group(), st = new THREE.Mesh(M.prop("seal").lit, mat.lit);
+      st.castShadow = true; g.add(st);
+      const gm = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+      g.add(new THREE.Mesh(M.prop("seal").glow, gm)); g.userData.gm = gm;
+      scene.add(g); sealObjs.push(g);
+    }
+    sealObjs.forEach(function (g, k) {
+      const q = seals[k];
+      g.visible = !!q && !!s.seen[q.idx];
+      if (!g.visible) return;
+      g.position.set(tx(s, q.idx), 0, tz(s, q.idx));
+      const pulse = 0.75 + 0.25 * Math.sin(time * 2.5 + k);
+      g.userData.gm.color.setHex(q.taken ? 0xb06cff : 0xffe9a0).multiplyScalar(0.7 + 0.5 * pulse);
+      pt(glowPts, g.position.x, 0.85, g.position.z, 2.4, q.taken ? C_VIO : [1, 0.88, 0.55], 0.22 * pulse);
+      if (!q.taken && Math.random() < dt * 3) emit(true, g.position.x + (Math.random() - 0.5) * 0.5, 0.2, g.position.z + (Math.random() - 0.5) * 0.5, 0, 0.6, 0, 1.4, 0.2, [1, 0.9, 0.6], -0.2, STAR, 0.8);
+    });
+
     riftGrp.visible = !!s.seen[s.rift.idx];
     riftGrp.position.set(tx(s, s.rift.idx), 0, tz(s, s.rift.idx));
     if (riftOn !== s.rift.on) { riftOn = s.rift.on; riftRings.forEach(function (r) { r.material = riftOn ? mat.rift : mat.riftOff; }); }
@@ -861,6 +927,19 @@
       pt(glowPts, px, 0.35, pz, 1.1, rgb("#ffd75e"), 0.18 + 0.08 * Math.sin(time * 3));
     }
     frameSet.forEach(done);
+
+    // Tutorial-Pfeil
+    const ti = s._tutTarget === undefined ? -1 : s._tutTarget;
+    tutArrow.visible = ti >= 0;
+    if (ti >= 0) {
+      const base = tall(s, ti) ? WH * 1.05 : 0.02;
+      tutArrow.position.set(tx(s, ti), base + 0.9 + Math.abs(Math.sin(time * 3)) * 0.35, tz(s, ti));
+      tutArrow.rotation.y = time * 1.5;
+      const r = tutArrow.getObjectByName("ring");
+      r.position.y = -(0.9 + Math.abs(Math.sin(time * 3)) * 0.35) + 0.03;
+      r.scale.setScalar(1 + 0.15 * Math.sin(time * 4));
+      pt(glowPts, tutArrow.position.x, tutArrow.position.y, tutArrow.position.z, 1.6, [1, 0.8, 0.35], 0.4);
+    }
 
     // Kriegstrommel
     banner.visible = !!s.rally;
@@ -969,7 +1048,7 @@
   }
   function syncLights(s, v, time) {
     const weak = s.coreHp / B.coreHp < 0.35;
-    setLight(lights[0], tx(s, s.coreIdx), tz(s, s.coreIdx), weak ? 0xff6a4a : 0x4ff0dc, 26 + Math.sin(time * 2.2) * 5, 11, 1.4);
+    setLight(lights[0], tx(s, s.coreIdx), tz(s, s.coreIdx), weak ? 0xff6a4a : 0x4ff0dc, 15 + Math.sin(time * 2.2) * 3, 9, 1.4);
     if (s.seen[s.rift.idx]) setLight(lights[1], tx(s, s.rift.idx), tz(s, s.rift.idx), 0xa060ff, s.rift.on ? 26 : 6, 8, 1);
     else lights[1].intensity = 0;
 
@@ -985,11 +1064,13 @@
       pt(glowPts, e.x, 0.65, e.y, 2.0, C_FIRE, 0.06);
     }
     for (const sh of s.shafts) if (s.seen[sh]) cand.push([tx(s, sh), tz(s, sh), 0xffdca0, 12, 6, Math.hypot(tx(s, sh) - v.cx, tz(s, sh) - v.cy) + 3]);
+    for (const q of torches) cand.push([q[0], q[1], 0xff8a3c, 7.5 + Math.sin(time * 11 + q[2]) * 1.2, 5.5, Math.hypot(q[0] - v.cx, q[1] - v.cy) + 1.5, 0.95]);
     for (const q of lightSpots) cand.push([q[0], q[1], q[2], q[3] + Math.sin(time * 8 + q[0]) * 1.5, q[4], Math.hypot(q[0] - v.cx, q[1] - v.cy) + 2]);
+    for (const q of s.seals || []) if (s.seen[q.idx]) cand.push([tx(s, q.idx), tz(s, q.idx), q.taken ? 0xa060ff : 0xffdc9a, 9, 5, Math.hypot(tx(s, q.idx) - v.cx, tz(s, q.idx) - v.cy) + 1]);
     cand.sort(function (a, b) { return a[5] - b[5]; });
     for (let k = 2; k < lights.length; k++) {
       const c = cand[k - 2];
-      if (c) setLight(lights[k], c[0], c[1], c[2], c[3], c[4]); else lights[k].intensity = 0;
+      if (c) setLight(lights[k], c[0], c[1], c[2], c[3], c[4], c[6]); else lights[k].intensity = 0;
     }
   }
 
@@ -1059,12 +1140,17 @@
       emit(true, q[0], q[3] + 0.04, q[1], (Math.random() - 0.5) * 0.3, 0.5 + Math.random() * 0.5, (Math.random() - 0.5) * 0.3, 0.7, 0.09, [1, 0.7, 0.3], -0.4);
       if (Math.random() < 0.5) emit(false, q[0], q[3] + 0.25, q[1], (Math.random() - 0.5) * 0.1, 0.3, (Math.random() - 0.5) * 0.1, 1.6, 0.4, [0.13, 0.12, 0.15], -0.05, SMOKE, 0.22);
     }
+    // Wassertropfen fallen von den Wänden
+    if (torches.length && Math.random() < dt * Math.min(6, torches.length * 0.25)) {
+      const q = torches[(Math.random() * torches.length) | 0];
+      emit(false, q[0] + (Math.random() - 0.5) * 0.9, 1.0, q[1] + (Math.random() - 0.5) * 0.9, 0, -0.5, 0, 0.9, 0.06, [0.55, 0.65, 0.8], 9, DOT, 0.9);
+    }
     // Schwebeteilchen in der Luft
     if (Math.random() < dt * 10) {
       emit(true, v.cx + (Math.random() - 0.5) * camDist * 1.3, 0.2 + Math.random() * 1.3, v.cy + (Math.random() - 0.5) * camDist,
         (Math.random() - 0.5) * 0.12, 0.03, (Math.random() - 0.5) * 0.12, 4, 0.07, [0.2, 0.26, 0.34], 0);
     }
-    pt(glowPts, tx(s, s.coreIdx), 0.7, tz(s, s.coreIdx), 5.5, C_TEAL, 0.3 + Math.sin(time * 2.2) * 0.06);
+    pt(glowPts, tx(s, s.coreIdx), 0.7, tz(s, s.coreIdx), 4.5, C_TEAL, 0.16 + Math.sin(time * 2.2) * 0.04);
     if (s.seen[s.rift.idx]) pt(glowPts, tx(s, s.rift.idx), 0.3, tz(s, s.rift.idx), 3.2, C_VIO, s.rift.on ? 0.34 : 0.1);
     for (const sh of s.shafts) if (s.seen[sh]) pt(glowPts, tx(s, sh), 0.4, tz(s, sh), 2.8, [1, 0.86, 0.6], 0.2);
 
@@ -1091,6 +1177,11 @@
     if (!rq) rq = Math.min(1, 1.6 / dpr);          // sehr hochauflösende Bildschirme: etwas gröber rechnen
     const rw = Math.max(1, Math.round(v.w * rq)), rh = Math.max(1, Math.round(v.h * rq));
     if (renderer.domElement.width !== rw || renderer.domElement.height !== rh) renderer.setSize(rw, rh, false);
+    if (composer && (postW !== rw || postH !== rh)) {
+      postW = rw; postH = rh;
+      composer.setSize(rw, rh);
+      bloom.resolution.set(Math.round(rw / 2), Math.round(rh / 2));
+    }
     const asp = v.w / Math.max(1, v.h);
     if (camera.aspect !== asp) { camera.aspect = asp; camera.updateProjectionMatrix(); }
     const cp = Math.cos(v.pitch), sp = Math.sin(v.pitch);
@@ -1098,7 +1189,7 @@
     camera.lookAt(v.cx, 0, v.cy);
     camera.updateMatrixWorld();
     pxScale = v.h / (2 * Math.tan(FOV * PI / 360));
-    scene.fog.density = 0.32 / camDist;
+    scene.fog.density = 0.6 / camDist;
 
     // Das Schattenlicht folgt der Kamera
     const half = TT.clamp(camDist * 1.15, 14, 36), sc = sun.shadow.camera;
@@ -1190,7 +1281,13 @@
     syncPreview(s, ui, time);
     syncParticles(s, v, time, dt);
     mat.mark.opacity = 0.22 + 0.08 * Math.sin(time * 4);
-    renderer.render(scene, camera);
+    if (composer) {
+      bloom.enabled = rq > 0.7;                          // auf langsamen Rechnern ohne Leuchten
+      grade.uniforms.time.value = time % 100;
+      grade.uniforms.aspect.value = v.w / Math.max(1, v.h);
+      grade.uniforms.alarm.value = s._alarm && !s.over ? 0.45 + 0.25 * Math.sin(time * 5) : 0;
+      composer.render(dt);
+    } else renderer.render(scene, camera);
   };
 
   /* ============================================================
@@ -1206,7 +1303,7 @@
     ents.forEach(function (o) {
       const e = o.e;
       if (!e || e.dead || e.held) return;
-      const def = TT.CREATURES[e.type], sc = (def.boss ? 1.55 : 1) * (1 + (e.lvl - 1) * 0.035);
+      const def = TT.CREATURES[e.type], sc = (def.boss || e.boss ? 1.55 : 1) * (1 + (e.lvl - 1) * 0.035);
       const p = V3.project(v, o.g.position.x, (o.md.h + o.md.hover) * sc + 0.14, o.g.position.z);
       if (!p || p[0] < -40 || p[1] < -40 || p[0] > v.w + 40 || p[1] > v.h + 40) return;
       const u = p[2], w = Math.max(22, u * 0.5), h = Math.max(3, u * 0.06), mx = TT.maxHp(s, e);
@@ -1225,6 +1322,11 @@
         ctx.font = "bold " + fs + "px 'Segoe UI', sans-serif";
         ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.8)"; ctx.strokeText(txt, p[0], y - 2);
         ctx.fillStyle = col; ctx.fillText(txt, p[0], y - 2);
+      }
+      if (e.boss && e.name) {                    // Bosse tragen ihren Namen über dem Kopf
+        ctx.font = "600 " + TT.clamp(Math.round(u * 0.16), 11, 17) + "px Cinzel, Georgia, serif";
+        ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.strokeText(e.name, p[0], y - fs - 4);
+        ctx.fillStyle = "#ffd98a"; ctx.fillText(e.name, p[0], y - fs - 4);
       }
     });
 
@@ -1257,6 +1359,6 @@
       const p = TT.previewInfo(s, ui);
       if (p.label) TT.drawLabel(ctx, p.label, ui.hmx + 16, ui.hmy - 12, p.stroke);
     }
-    TT.drawVignette(s, v, ctx, time);
+    if (!composer) TT.drawVignette(s, v, ctx, time);       // mit Nachbearbeitung übernimmt die das
   };
 })();

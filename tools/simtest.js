@@ -2,7 +2,7 @@
 /* Schnelltest der Spiellogik ohne Browser:  node tools/simtest.js
    Spielt mehrere Partien im Zeitraffer durch und prüft, ob alles plausibel bleibt. */
 const path = require("path");
-["config", "util", "map", "entities", "game"].forEach(function (f) {
+["config", "util", "map", "entities", "game", "campaign", "tutorial"].forEach(function (f) {
   require(path.join(__dirname, "..", "js", f + ".js"));
 });
 const TT = globalThis.TT, T = TT.T, ID = TT.ROOM_ID;

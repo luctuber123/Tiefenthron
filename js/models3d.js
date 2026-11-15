@@ -201,7 +201,7 @@
   const built = {};
   M.creature = function (type) {
     if (built[type]) return built[type];
-    const d = DEFS[type], B = new Builder(), G = new Builder(), A = new Builder(), AG = new Builder(), X = new Builder();
+    const d = DEFS[type] || DEFS[(TT.CREATURES[type] || {}).art], B = new Builder(), G = new Builder(), A = new Builder(), AG = new Builder(), X = new Builder();
     d.make(B, G, A, AG);
     if (d.extra) d.extra(X);
     return (built[type] = {
@@ -306,6 +306,19 @@
     pedestal: function (B, G) {
       B.cyl("#1c1826", 0, 0.07, 0, 0.4, 0.47, 0.14, 0, 0, 0, 8).cyl("#2a2438", 0, 0.17, 0, 0.3, 0.36, 0.08, 0, 0, 0, 8);
       for (let k = 0; k < 8; k++) { const a = k * TAU / 8 + 0.39; G.box("#37e0c8", Math.cos(a) * 0.44, 0.08, Math.sin(a) * 0.44, 0.02, 0.06, 0.06, 0, -a, 0); }
+    },
+    // Siegelstein: dunkler Obelisk mit Runen auf allen vier Seiten (die Runen leuchten, Farbe setzt die 3D-Ansicht)
+    seal: function (B, G) {
+      B.cyl("#2b2833", 0, 0.06, 0, 0.36, 0.42, 0.12, 0, 0, 0, 8);
+      B.cyl("#3a3644", 0, 0.62, 0, 0.12, 0.2, 1.0, 0, PI / 4, 0, 4);
+      B.cyl("#3a3644", 0, 1.19, 0, 0, 0.12, 0.14, 0, PI / 4, 0, 4);
+      for (let k = 0; k < 4; k++) {
+        const a = k * PI / 2, sx = Math.sin(a), sz = Math.cos(a), d = 0.112;
+        G.box("#ffffff", sx * d, 0.74, sz * d, 0.026, 0.42, 0.012, 0, a, 0);
+        G.box("#ffffff", sx * (d - 0.004), 0.84, sz * (d - 0.004), 0.1, 0.022, 0.012, 0, a, 0.6);
+        G.box("#ffffff", sx * (d + 0.006), 0.64, sz * (d + 0.006), 0.1, 0.022, 0.012, 0, a, -0.6);
+      }
+      G.torus("#ffffff", 0, 0.13, 0, 0.42, 0.018, PI / 2);
     },
     crystal: function (B) {
       B.cyl("#ffffff", 0, 0.34, 0, 0, 0.27, 0.68, 0, 0, 0, 6).cyl("#ffffff", 0, -0.14, 0, 0.27, 0, 0.28, 0, 0, 0, 6);

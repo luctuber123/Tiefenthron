@@ -32,6 +32,12 @@
       clips: { idle: "Idle", walk: "Walking_A", attack: "Spellcast_Shoot", work: "Spellcast_Raise", sleep: "Lie_Idle" } },
     ritter: { file: "knight", h: 0.84, show: ["1H_Sword", "Rectangle_Shield", "Knight_Helmet"],
       clips: { idle: "Idle", walk: "Walking_A", attack: "1H_Melee_Attack_Chop", work: "1H_Melee_Attack_Chop", sleep: "Lie_Idle" } },
+    zwerg: { file: "barbarian", h: 0.7, show: ["2H_Axe", "Barbarian_Hat"], tint: 0xc49a7a,
+      clips: { idle: "2H_Melee_Idle", walk: "Walking_A", attack: "2H_Melee_Attack_Chop", work: "2H_Melee_Attack_Chop", sleep: "Lie_Idle" } },
+    feuermagier: { file: "mage", h: 0.84, show: ["1H_Wand", "Mage_Hat", "Mage_Cape"], tint: 0xff9a7a,
+      clips: { idle: "Idle", walk: "Walking_A", attack: "Spellcast_Shoot", work: "Spellcast_Raise", sleep: "Lie_Idle" } },
+    paladin: { file: "knight", h: 0.9, show: ["1H_Sword", "Badge_Shield", "Knight_Helmet", "Knight_Cape"], tint: 0xe4ecff,
+      clips: { idle: "Idle", walk: "Walking_A", attack: "1H_Melee_Attack_Chop", work: "1H_Melee_Attack_Chop", sleep: "Lie_Idle" } },
     vogt: { file: "knight", h: 0.86, show: ["2H_Sword", "Knight_Helmet", "Knight_Cape"], tint: 0xffcf5a,
       clips: { idle: "2H_Melee_Idle", walk: "Walking_A", attack: "2H_Melee_Attack_Chop", work: "2H_Melee_Attack_Chop", sleep: "Lie_Idle" } },
   };
@@ -54,8 +60,11 @@
       const geos = list.map(function (m) {
         const g = m.geometry.clone();
         if (!tex) {
+          // Monsterfarben: entsättigt und abgedunkelt, damit die Horde finster statt knuffig wirkt
           const c = m.material.color, n = g.attributes.position.count, arr = new Float32Array(n * 3);
-          for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+          const l = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b, k = 0.82;
+          const r = (l + (c.r - l) * 0.62) * k, gg = (l + (c.g - l) * 0.62) * k, b = (l + (c.b - l) * 0.62) * k;
+          for (let i = 0; i < n; i++) { arr[i * 3] = r; arr[i * 3 + 1] = gg; arr[i * 3 + 2] = b; }
           g.setAttribute("color", new THREE.BufferAttribute(arr, 3));
         }
         Object.keys(g.attributes).forEach(function (k) { if (want.indexOf(k) < 0) g.deleteAttribute(k); });

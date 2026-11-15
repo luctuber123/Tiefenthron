@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tiefenthron</title>
   <link rel="stylesheet" href="css/schrift.css?v=9662c659">
-  <link rel="stylesheet" href="css/style.css?v=be104395">
+  <link rel="stylesheet" href="css/style.css?v=82545a64">
 </head>
 <body>
   <!-- unten das 3D-Bild, darüber die 2D-Ebene (2D-Ansicht bzw. Balken und Texte in der 3D-Ansicht) -->
@@ -64,7 +64,8 @@
       <p class="t-tag">Unter der Erde herrscht, wer am tiefsten gräbt.</p>
       <nav class="t-menu">
         <button id="t-continue" class="t-btn main"><span>Weiterspielen</span><small id="t-save"></small></button>
-        <button id="t-new" class="t-btn"><span id="t-new-label">Neues Spiel</span><small id="t-new-hint"></small></button>
+        <button id="t-camp" class="t-btn"><span>Kampagne</span><small id="t-camp-hint"></small></button>
+        <button id="t-free" class="t-btn"><span id="t-free-label">Freies Spiel</span><small id="t-free-hint"></small></button>
         <button id="t-help" class="t-btn"><span>Anleitung &amp; Steuerung</span><small>Worum es geht und wie man spielt</small></button>
       </nav>
       <div class="t-opts">
@@ -75,18 +76,37 @@
     <p class="t-credits" id="t-credits"></p>
   </div>
 
+  <!-- Kampagnenkarte: links der Weg nach oben, rechts die Einsatzbesprechung -->
+  <div id="camp">
+    <div class="c-map">
+      <h2>Der Weg nach oben</h2>
+      <p class="c-sub">Acht Schichten Fels trennen dich von der Oberwelt.</p>
+      <svg id="c-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-label="Kampagnenkarte"></svg>
+      <button id="c-back">Zurück zum Hauptmenü</button>
+    </div>
+    <div class="c-brief" id="c-brief"></div>
+  </div>
+
+  <!-- im Spiel: Ziele des Gebiets und Lebensleiste des Endbosses -->
+  <div id="goals"></div>
+  <div id="tut"></div>
+  <div id="bossbar"><div class="b-name" id="b-name"></div><div class="b-bar"><i id="b-fill"></i></div></div>
+
   <div id="overlay"><div id="card"></div></div>
 
-  <script src="js/config.js?v=eb54029b"></script>
+  <script src="js/config.js?v=6503a01c"></script>
   <script src="js/util.js?v=219a3ebc"></script>
   <script src="js/icons.js?v=9aea2f91"></script>
-  <script src="js/map.js?v=646f9def"></script>
-  <script src="js/entities.js?v=e4b56fa0"></script>
-  <script src="js/game.js?v=85025923"></script>
-  <script src="js/audio.js?v=3aa00877"></script>
-  <script src="js/render.js?v=99196663"></script>
+  <script src="js/map.js?v=cb187b3a"></script>
+  <script src="js/entities.js?v=44592868"></script>
+  <script src="js/game.js?v=b4e04e1d"></script>
+  <script src="js/campaign.js?v=6fc16818"></script>
+  <script src="js/tutorial.js?v=fd844342"></script>
+  <script src="js/audio.js?v=622164c1"></script>
+  <script src="js/render.js?v=156c7a7a"></script>
   <script src="vendor/three.min.js?v=ccabb6c3"></script>
   <script src="vendor/three-addons.js?v=875d2998"></script>
+  <script src="vendor/three-post.js?v=8ead141b"></script>
   <!-- eingebettete Kreaturenmodelle (Herkunft und Lizenz: assets/QUELLEN.md) -->
   <script src="assets/models/orc_blob.js?v=972a32c9"></script>
   <script src="assets/models/orc.js?v=4ce80b2c"></script>
@@ -105,10 +125,10 @@
   <script src="assets/env/dungeon.js?v=017c030d"></script>
   <script src="assets/env/furniture.js?v=ae404d04"></script>
   <script src="assets/env/halloween.js?v=9a996e92"></script>
-  <script src="js/models3d.js?v=a674bb0c"></script>
-  <script src="js/assets3d.js?v=b2adf4f5"></script>
-  <script src="js/render3d.js?v=c2802a3f"></script>
-  <script src="js/ui.js?v=2e8d3611"></script>
-  <script src="js/main.js?v=e1f5c2f1"></script>
+  <script src="js/models3d.js?v=1ed43b6b"></script>
+  <script src="js/assets3d.js?v=df9ac5a1"></script>
+  <script src="js/render3d.js?v=262feb7e"></script>
+  <script src="js/ui.js?v=becddfad"></script>
+  <script src="js/main.js?v=b4afa9c9"></script>
 </body>
 </html>

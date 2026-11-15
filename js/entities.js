@@ -103,9 +103,9 @@
         const put = TT.addGold(s, loot);
         if (put > 0) s.fx.push({ k: "text", x: e.x, y: e.y - 0.4, text: "+" + put, color: "#ffd75e", t: 1.1, d: 1.1 });
       }
-      if (def.boss) {
-        TT.msg(s, "Der Lichtvogt ist gefallen! Die Oberwelt erzittert.", "good");
-        if (!s.won) s.won = true;
+      if (e.boss || (def.boss && !TT.levelOf(s))) {
+        TT.msg(s, (e.name || "Der Lichtvogt") + " ist gefallen! Die Oberwelt erzittert.", "good");
+        if (!s.won) { s.won = true; s.wonAt = s.time; }
         return;
       }
       // Gefangennahme, falls eine Kerkerzelle frei ist (nicht jeder überlebt seine Niederlage)
@@ -262,7 +262,8 @@
       e.rep = 0.3;
       if (s._foes > 0) {
         let near = 99;
-        for (const o of s.ents) if (o.foe && !o.dead) near = Math.min(near, Math.hypot(o.x - e.x, o.y - e.y));
+        // Ruhende Wachen sind keine Gefahr – geflohen wird erst, wenn eine Wache wirklich angreift
+        for (const o of s.ents) if (o.foe && !o.dead && !(o.guard && o.st !== "fight")) near = Math.min(near, Math.hypot(o.x - e.x, o.y - e.y));
         if (near < 3.5 && (e.st !== "flee" || !e.path.length)) {
           // Ein paar erreichbare Felder ausprobieren und das nehmen, das am weitesten von allen Feinden weg ist
           const me = TT.tileOf(s, e), fl = TT.flood(s, me, false);
@@ -490,7 +491,7 @@
         s.fx.push({ k: "hit", x: (a % W) + 0.5, y: ((a / W) | 0) + 0.5, t: 0.18, d: 0.18 });
         TT.sfx("hit");
         if (tr) {
-          tr.hp -= def.dmg * (1 + 0.12 * (e.lvl - 1));
+          tr.hp -= def.dmg * (def.doorMult || 1) * (1 + 0.12 * (e.lvl - 1));   // Flammenruferinnen sprengen Türen schneller
           if (tr.hp <= 0) { TT.removeTrap(s, a); TT.msg(s, "Eine Tür wurde eingeschlagen!", "bad"); }
         } else s.obj[a] = 0;
       }
@@ -518,7 +519,15 @@
         }
       }
     }
-    if (e.st === "fight") { fightStep(s, e, dt, def); return; }
+    // Wachen verteidigen nur die Umgebung ihres Siegelsteins und kehren danach zu ihm zurück
+    const post = e.guard && e.post !== undefined;
+    const px = post ? (e.post % s.W) + 0.5 : 0, py = post ? ((e.post / s.W) | 0) + 0.5 : 0;
+    const nearPost = function (o) { return !post || Math.hypot(o.x - px, o.y - py) <= 6; };
+    if (e.st === "fight") {
+      const tg = TT.byId(s, e.target);
+      if (post && (!tg || !nearPost(tg))) { e.st = "idle"; e.target = 0; e.path = []; e.think = 0; }
+      else { fightStep(s, e, dt, def); return; }
+    }
 
     e.think -= dt;
     if (e.think <= 0) {
@@ -526,14 +535,19 @@
       const fl = TT.flood(s, TT.tileOf(s, e), true);
       let best = null, bd = 9;
       for (const o of s.ents) {
-        if (o.foe || o.dead || o.held) continue;
+        if (o.foe || o.dead || o.held || !nearPost(o)) continue;
         if (Math.abs(o.x - e.x) > 8 || Math.abs(o.y - e.y) > 8) continue;
         const d = fl.dist[TT.tileOf(s, o)];
         if (d >= 0 && d < bd) { bd = d; best = o; }
       }
       if (best) { e.st = "fight"; e.target = best.id; e.path = []; e.rep = 0; e.nx = -1; return; }
+      if (post && Math.hypot(e.x - px, e.y - py) > 1.6 && !e.path.length) {
+        const back = TT.flood(s, TT.tileOf(s, e), true);
+        if (back.dist[e.post] > 0) e.path = TT.pathTo(back, e.post);
+      }
     }
-    advance(s, e, dt, def);
+    if (!e.guard) advance(s, e, dt, def);
+    else if (e.path.length) followPath(s, e, dt, def);   // zurück zum Posten
   }
 
   /* ---------- Haupt-Update pro Kreatur ---------- */
@@ -555,7 +569,7 @@
   // Kurzbeschreibung für die Info-Anzeige
   TT.describe = function (s, e) {
     if (e.held) return "zappelt in deinem Griff";
-    if (e.foe) return e.st === "fight" ? "kämpft" : "marschiert auf den Herzkern zu";
+    if (e.foe) return e.st === "fight" ? "kämpft" : e.guard ? "bewacht einen Siegelstein" : "marschiert auf den Herzkern zu";
     if (e.worker) {
       if (e.st === "flee") return "flieht";
       if (e.job) return e.job.kind === "dig" ? "gräbt" : e.job.kind === "claim" ? "beansprucht Boden" : "trägt Gold heim";

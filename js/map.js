@@ -4,8 +4,12 @@
   const T = TT.T;
 
   /* ---------- Neues Spiel ---------- */
-  TT.newGame = function (seed) {
-    const W = TT.W, H = TT.H, n = W * H, B = TT.BAL;
+  /* opts (alle freiwillig): W, H, gold, shafts, firstWave, levelId,
+       seals = Anzahl Siegelsteine, guards = Wachen je Siegelstein, guardLvl = deren Stufe */
+  TT.newGame = function (seed, opts) {
+    opts = opts || {};
+    const W = opts.W || TT.W, H = opts.H || TT.H, n = W * H, B = TT.BAL;
+    const sz = (W * H) / (TT.W * TT.H), sf = Math.sqrt(sz);     // Größe im Vergleich zum freien Spiel
     const rnd = TT.rng(seed);
     const ri = function (a, b) { return a + Math.floor(rnd() * (b - a + 1)); };
     const fill = function (v) { return new Array(n).fill(v); };
@@ -16,10 +20,11 @@
       dig: fill(0), ore: fill(0), food: fill(0), obj: fill(0),
       traps: [], ents: [], nextId: 1, prisoners: [], pickups: [], shafts: [], fx: [],
       msgs: [], msgN: 0,
-      gold: B.startGold, ess: 120, parts: 0,
+      gold: opts.gold || B.startGold, ess: 120, parts: 0,
       research: { done: {}, cur: null, pts: 0 },
       time: 0, payT: B.payEvery, gateT: 10, growT: 0,
-      waveN: 0, waveT: B.firstWave, warned: false, shaftPick: 0,
+      waveN: 0, waveT: opts.firstWave || B.firstWave, warned: false, shaftPick: 0,
+      levelId: opts.levelId === undefined ? null : opts.levelId, seals: [], bossPhase: 0, bossT: 0, coreLow: B.coreHp,
       rally: null, rallyN: 0,
       coreIdx: 0, coreHp: B.coreHp, coreHitT: -99, coreMsgT: -99,
       rift: { idx: 0, on: false },
@@ -51,7 +56,7 @@
     }
 
     // Felsbrocken
-    for (let k = 0; k < 36; k++) {
+    for (let k = 0; k < Math.round(36 * sz); k++) {
       walk(ri(2, W - 3), ri(2, H - 3), ri(3, 12), function (x, y, i) { if (dc(x, y) > 6) s.tiles[i] = T.ROCK; });
     }
 
@@ -59,16 +64,16 @@
     const gold = function (x, y, i) { if (dc(x, y) > 3.6) { s.tiles[i] = T.GOLD; s.ore[i] = B.oreGold; } };
     const a0 = rnd() * Math.PI * 2;
     walk(Math.round(cx + Math.cos(a0) * 7), Math.round(cy + Math.sin(a0) * 6), 8, gold);
-    for (let k = 0; k < 11; k++) {
+    for (let k = 0; k < Math.round(11 * sz); k++) {
       let x, y, g = 0;
       do { x = ri(3, W - 4); y = ri(3, H - 4); } while (dc(x, y) < 9 && g++ < 50);
       walk(x, y, ri(4, 9), gold);
     }
 
     // Kristalladern: unerschöpflich, aber weit draußen
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < Math.max(2, Math.round(3 * sz)); k++) {
       let x, y, g = 0;
-      do { x = ri(4, W - 5); y = ri(4, H - 5); } while (dc(x, y) < 15 && g++ < 80);
+      do { x = ri(4, W - 5); y = ri(4, H - 5); } while (dc(x, y) < 15 * sf && g++ < 80);
       gold(x + 1, y, y * W + x + 1); gold(x, y + 1, (y + 1) * W + x);
       s.tiles[y * W + x] = T.GEM; s.ore[y * W + x] = 0;
     }
@@ -79,12 +84,31 @@
     const ry = TT.clamp(Math.round(cy + Math.sin(a1) * 8), 4, H - 5);
     const special = [[rx, ry]];
     const cand = [[4, 4], [W - 5, 4], [4, H - 5], [W - 5, H - 5], [cx, 3], [cx, H - 4]];
+    if (W > 70) cand.push([3, cy], [W - 4, cy]);
     for (let k = cand.length - 1; k > 0; k--) { const j = ri(0, k), tmp = cand[k]; cand[k] = cand[j]; cand[j] = tmp; }
-    const shafts = cand.slice(0, 3);
+    const shafts = cand.slice(0, opts.shafts || 3);
     shafts.forEach(function (p) { special.push(p); });
 
+    // Siegelsteine: rundum verteilt in eigenen Höhlen, weit weg vom Herzkern und von den Schächten
+    const seals = [];
+    if (opts.seals) {
+      const base = rnd() * Math.PI * 2, rxS = W / 2 - 6, ryS = H / 2 - 5;
+      for (let k = 0; k < opts.seals; k++) {
+        let x = 0, y = 0, ok = false;
+        for (let g = 0; g < 160 && !ok; g++) {
+          const relax = g < 60 ? 1 : g < 110 ? 0.85 : 0.7;      // findet sich kein Platz, Abstände schrittweise lockern
+          const a = base + k * Math.PI * 2 / opts.seals + (rnd() - 0.5) * 0.7, f = 0.72 + rnd() * 0.26;
+          x = TT.clamp(Math.round(cx + Math.cos(a) * rxS * f), 5, W - 6);
+          y = TT.clamp(Math.round(cy + Math.sin(a) * ryS * f), 5, H - 6);
+          ok = dc(x, y) >= Math.max(12, 0.42 * Math.min(W, H) * relax) && special.concat(seals).every(function (p) { return Math.hypot(p[0] - x, p[1] - y) >= 8 * relax; });
+        }
+        if (!ok) continue;
+        seals.push([x, y]); special.push([x, y]);
+      }
+    }
+
     // Verborgene Höhlen mit Truhen
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < Math.round(4 * sz); k++) {
       let x, y, g = 0, ok = false;
       do {
         x = ri(4, W - 5); y = ri(4, H - 5);
@@ -102,6 +126,11 @@
     area(rx, ry, 1, T.FLOOR);
     s.rift.idx = ry * W + rx;
     shafts.forEach(function (p) { area(p[0], p[1], 1, T.FLOOR); s.shafts.push(p[1] * W + p[0]); });
+    seals.forEach(function (p) {
+      walk(p[0], p[1], 12, function (px, py, i) { s.tiles[i] = T.FLOOR; s.ore[i] = 0; });
+      area(p[0], p[1], 1, T.FLOOR);
+      s.seals.push({ idx: p[1] * W + p[0], taken: false });
+    });
 
     // Sicherstellen, dass kein Fels den Weg zum Kern völlig versperrt
     function corridor(x, y) {
@@ -113,9 +142,19 @@
     }
     corridor(rx, ry);
     shafts.forEach(function (p) { corridor(p[0], p[1]); });
+    seals.forEach(function (p) { corridor(p[0], p[1]); });
 
     TT.reveal(s, s.coreIdx, 7);
     [1, -1, W, -W].forEach(function (d) { TT.spawn(s, "digger", s.coreIdx + d, false); });
+    // Siegelsteine schimmern durch den Nebel; ihre Wachen stehen bereit
+    const offs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
+    s.seals.forEach(function (seal) {
+      TT.reveal(s, seal.idx, 1);
+      (opts.guards || []).forEach(function (type, j) {
+        const o = offs[j % offs.length], e = TT.spawn(s, type, seal.idx + o[0] + o[1] * W, true);
+        e.guard = true; e.post = seal.idx; e.lvl = opts.guardLvl || 1; e.hp = TT.maxHp(s, e);
+      });
+    });
     TT.msg(s, "Der Herzkern erwacht. Markiere Erdreich zum Graben.", "good");
     return s;
   };
@@ -144,6 +183,7 @@
   TT.claimTile = function (s, i) {
     s.tiles[i] = T.CLAIMED;
     TT.reveal(s, i, 3);
+    for (const seal of s.seals || []) if (seal.idx === i && !seal.taken) TT.sealTaken(s, seal);
     if (i === s.rift.idx && !s.rift.on) {
       s.rift.on = true;
       s.gateT = Math.min(s.gateT, 6);
