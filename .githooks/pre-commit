@@ -1,0 +1,5 @@
+#!/bin/sh
+# Vor jedem Speichern (commit): Fingerabdrücke in index.html aktualisieren, damit Spieler nach einem Update
+# keine Mischung aus alten und neuen Dateien bekommen. Siehe tools/stamp.js.
+node tools/stamp.js >/dev/null || exit 1
+git add index.html
