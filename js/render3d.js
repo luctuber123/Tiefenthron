@@ -176,11 +176,11 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.18;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x030205);
-    scene.fog = new THREE.FogExp2(0x05060c, 0.02);            // kalter, fast schwarzer Nebel
+    scene.background = new THREE.Color(0x06060c);
+    scene.fog = new THREE.FogExp2(0x0b0d18, 0.02);            // kalter, dunkler Nebel
     camera = new THREE.PerspectiveCamera(FOV, 1, 0.5, 240);
 
     // Umgebungslicht fürs Glänzen von Gold, Rüstungen und Kristallen
@@ -197,24 +197,25 @@
     pm.dispose();
 
     // Licht: weiches Grundlicht, ein schräges Hauptlicht mit Schatten, dazu einige Punktlichter
-    // Kaum Grundlicht: Fackeln, Glut, Kristalle und der Herzkern sind die eigentlichen Lichtquellen
-    hemi = new THREE.HemisphereLight(0x5a6a9a, 0x1a1020, 0.5);
+    // Kühles Grundlicht, damit man überall etwas erkennt; Fackeln, Glut, Kristalle und der Herzkern setzen die warmen Akzente
+    hemi = new THREE.HemisphereLight(0x8090c0, 0x322a3c, 0.8);
     scene.add(hemi);
-    sun = new THREE.DirectionalLight(0x8fa0d8, 0.6);         // ein Hauch kaltes Licht von oben, nur für Schatten und Kanten
+    sun = new THREE.DirectionalLight(0xa4b4ea, 0.75);        // kaltes Licht von schräg oben für Schatten und Kanten
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
     sun.shadow.camera.near = 1; sun.shadow.camera.far = 120;
     scene.add(sun); scene.add(sun.target);
-    for (let k = 0; k < 12; k++) { const l = new THREE.PointLight(0xffffff, 0, 9, 2); l.position.set(0, -50, 0); scene.add(l); lights.push(l); }
+    for (let k = 0; k < 16; k++) { const l = new THREE.PointLight(0xffffff, 0, 9, 2); l.position.set(0, -50, 0); scene.add(l); lights.push(l); }
 
     /* Nachbearbeitung: Leuchten um helle Stellen, danach Farbstimmung, Randabdunklung und Filmkorn */
     if (THREE.EffectComposer && THREE.UnrealBloomPass && THREE.OutputPass) {
       try {
-        composer = new THREE.EffectComposer(renderer);
+        const rt = new THREE.WebGLRenderTarget(512, 512, { type: THREE.HalfFloatType, samples: 4 });   // 4-fache Kantenglättung
+        composer = new THREE.EffectComposer(renderer, rt);
         composer.setPixelRatio(1);
         composer.addPass(new THREE.RenderPass(scene, camera));
-        bloom = new THREE.UnrealBloomPass(new THREE.Vector2(512, 512), 0.6, 0.5, 0.8);
+        bloom = new THREE.UnrealBloomPass(new THREE.Vector2(512, 512), 0.42, 0.5, 0.9);
         composer.addPass(bloom);
         composer.addPass(new THREE.OutputPass());
         grade = new THREE.ShaderPass({
@@ -225,13 +226,14 @@
             "void main() {",
             "  vec3 c = texture2D(tDiffuse, vUv).rgb;",
             "  float l = dot(c, vec3(0.299, 0.587, 0.114));",
-            "  c = mix(vec3(l), c, 0.74);                                          // gedämpfte Farben",
-            "  c = (c - 0.5) * 1.1 + 0.5;                                          // etwas mehr Kontrast",
+            "  c = mix(vec3(l), c, 0.88);                                          // leicht gedämpfte Farben",
+            "  c = pow(max(c, 0.0), vec3(0.93));                                   // Schatten aufhellen",
+            "  c = (c - 0.5) * 1.05 + 0.5;                                         // etwas mehr Kontrast",
             "  c += vec3(-0.012, -0.004, 0.02) * (1.0 - smoothstep(0.0, 0.35, l));    // kühle Schatten",
             "  c *= mix(vec3(1.0), vec3(1.08, 0.98, 0.86), smoothstep(0.35, 1.0, l)); // warme Lichter",
             "  vec2 q = (vUv - 0.5) * vec2(aspect, 1.0);",
             "  float d = length(q);",
-            "  c *= 1.0 - smoothstep(0.38, 0.95, d) * 0.78;                        // Abdunklung zum Rand",
+            "  c *= 1.0 - smoothstep(0.45, 1.0, d) * 0.42;                         // Abdunklung zum Rand",
             "  c = mix(c, c * vec3(1.35, 0.55, 0.5) + vec3(0.06, 0.0, 0.0), alarm * smoothstep(0.35, 0.85, d));",
             "  float n = fract(sin(dot(vUv * 913.7 + time * 7.1, vec2(12.9898, 78.233))) * 43758.5453);",
             "  c += (n - 0.5) * 0.04;                                              // Filmkorn",
@@ -254,7 +256,7 @@
     mat.crystal = new THREE.MeshStandardMaterial({ color: 0x7ff5ee, roughness: 0.12, metalness: 0.15, flatShading: true, emissive: 0x1fa8c8, emissiveIntensity: 1.3, envMapIntensity: 1.8 });
     mat.rift = new THREE.MeshBasicMaterial({ color: 0xb06cff, toneMapped: false });
     mat.riftOff = new THREE.MeshBasicMaterial({ color: 0x4a4458 });
-    mat.mark = new THREE.MeshBasicMaterial({ color: 0x37e0c8, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false });
+    mat.mark = new THREE.MeshBasicMaterial({ color: 0x37e0c8, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false });
     mat.pre = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
     mat.cone = new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.075, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 
@@ -288,6 +290,15 @@
     for (let id = 1; id < TT.ROOMS.length; id++) {
       mk.roomFloor[id] = inst(plane, floorMat(edges(grain(gain(soft(k4(TT.ROOMS[id].key), 0.8), 1.3), 0.1, 20 + id), 0.4), 0.8), 900, false, true);
     }
+    // Kontaktschatten: ein halbes Feld breiter Streifen, der zur Wand hin dunkler wird
+    const aoc = document.createElement("canvas"); aoc.width = 4; aoc.height = 64;
+    const ag2 = aoc.getContext("2d"), agr = ag2.createLinearGradient(0, 64, 0, 0);
+    agr.addColorStop(0, "rgba(0,0,0,0)"); agr.addColorStop(0.55, "rgba(0,0,0,0.28)"); agr.addColorStop(1, "rgba(0,0,0,0.7)");
+    ag2.fillStyle = agr; ag2.fillRect(0, 0, 4, 64);
+    const aoGeo = new THREE.PlaneGeometry(1, 0.46); aoGeo.rotateX(-PI / 2);
+    mk.ao = inst(aoGeo, new THREE.MeshBasicMaterial({ color: 0x000000, map: new THREE.CanvasTexture(aoc), transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2 }), n * 2, false, false, true);
+    mk.ao.renderOrder = 1;
     mk.mark = inst(box, mat.mark, n, false, false, true);
     mk.mark.renderOrder = 3;
     mk.pre = inst(box, mat.pre, n + 8, false, false);
@@ -403,21 +414,21 @@
      ============================================================ */
   function mapChanged(s) {
     const n = s.tiles.length;
-    if (!sig || sig.length !== n) { sig = new Uint16Array(n); sig.fill(65535); }
+    if (!sig || sig.length !== n) { sig = new Uint16Array(n); sig.fill(65535); resetTerrain(s); }
     let ch = false;
     for (let i = 0; i < n; i++) {
       const t = s.tiles[i];
       const dq = s.dig[i] > 0 ? Math.min(3, 1 + ((s.dig[i] / B.digTime * 3) | 0)) : 0;
       const oq = t === T.GOLD ? 3 - Math.min(3, (s.ore[i] / B.oreGold * 3.99) | 0) : 0;
       const v = t | (s.room[i] << 3) | (s.seen[i] << 7) | (s.mark[i] << 8) | (dq << 9) | (oq << 11) | (s.food[i] << 13);
-      if (sig[i] !== v) { sig[i] = v; ch = true; }
+      if (sig[i] !== v) { sig[i] = v; ch = true; markDirty(s, i); }
     }
     const fq = Math.round(s.gold / TT.goldCap(s) * 5);
     if (fq !== lastFill) { lastFill = fq; ch = true; }
     return ch;
   }
 
-  const MAPSET = ["earth", "rock", "gold", "gem", "fog", "dirt", "claimed", "mark", "nest", "mushStem", "mushCap", "pile", "nugget",
+  const MAPSET = ["ao", "earth", "rock", "gold", "gem", "fog", "dirt", "claimed", "mark", "nest", "mushStem", "mushCap", "pile", "nugget",
     "shardA", "shardB", "dummy", "shelf", "shelfGlow", "anvil", "anvilGlow", "brazier", "brazierGlow", "cage", "torch", "torchGlow"];
 
   /* ---------- Umgebung aus fertigen Bauteilen (assets/env) ----------
@@ -428,13 +439,13 @@
   const COINS = ["coinS", "coinM", "coinS", "coinL", "coinM"];
   // Raum -> Bodenbelag und Einfärbung (Rot, Grün, Blau), damit man Räume weiter auf einen Blick erkennt
   const ROOM_FLOOR = {};
-  ROOM_FLOOR[ID.treasury] = ["fTile", 1.5, 1.15, 0.5];
-  ROOM_FLOOR[ID.lair] = ["fWoodD", 1.25, 1.0, 1.9];
-  ROOM_FLOOR[ID.garden] = ["dirt", 0.7, 1.5, 0.75];
-  ROOM_FLOOR[ID.training] = ["fWood", 1.5, 1.05, 0.85];
-  ROOM_FLOOR[ID.archive] = ["fWoodD", 0.85, 1.3, 2.1];
-  ROOM_FLOOR[ID.forge] = ["fTile", 0.62, 0.6, 0.7];
-  ROOM_FLOOR[ID.prison] = ["fTile", 1.35, 0.6, 0.9];
+  ROOM_FLOOR[ID.treasury] = ["fTile", 1.2, 1.06, 0.8];
+  ROOM_FLOOR[ID.lair] = ["fWoodD", 1.05, 0.95, 1.25];
+  ROOM_FLOOR[ID.garden] = ["dirt", 0.85, 1.12, 0.86];
+  ROOM_FLOOR[ID.training] = ["fWood", 1.08, 0.94, 0.86];
+  ROOM_FLOOR[ID.archive] = ["fWoodD", 0.92, 1.02, 1.28];
+  ROOM_FLOOR[ID.forge] = ["fTile", 0.72, 0.7, 0.76];
+  ROOM_FLOOR[ID.prison] = ["fTile", 1.12, 0.84, 0.94];
 
   function envMesh(key, name, cap, cast, perFrame) {
     const p = TT.A3.prop(name);
@@ -475,6 +486,262 @@
   const C_FLAME = [1, 0.58, 0.2], C_FLAME_IN = [1, 0.93, 0.62];
   const C_MUSH = rgb("#39e0b0"), C_FIRE = rgb("#ff8a3c"), C_CANDLE = rgb("#ffd27a"), C_TEAL = rgb("#59f0e0"), C_VIO = rgb("#b06cff");
 
+  /* ============================================================
+     Gestein als zusammenhängende, zerklüftete Masse
+     Die Karte ist in Blöcke zu 16 x 16 Feldern geteilt; neu gebaut werden nur Blöcke, in denen sich etwas geändert hat.
+     Oberseiten sind facettiert (jedes Feld 4 Dreiecke mit leicht unterschiedlichen Höhen), Felswände unregelmäßig
+     ausgebeult und unten dunkler. Farbe kommt pro Eckpunkt, Struktur aus einer selbst erzeugten Steintextur.
+     ============================================================ */
+  const CH = 16;
+  let chunkMeshes = [], chunkCols = 1, dirtyChunks = new Set(), rockMat = null;
+  const TILE_COL = {};
+  TILE_COL[T.EARTH] = [0.41, 0.31, 0.27]; TILE_COL[T.ROCK] = [0.3, 0.32, 0.41];
+  TILE_COL[T.GOLD] = [0.58, 0.46, 0.29]; TILE_COL[T.GEM] = [0.33, 0.45, 0.52];
+  const FOG_COL = [0.085, 0.08, 0.105];
+
+  function resetTerrain(s) {
+    chunkMeshes.forEach(function (m) { if (m) { scene.remove(m); m.geometry.dispose(); } });
+    chunkCols = Math.ceil(s.W / CH);
+    chunkMeshes = new Array(chunkCols * Math.ceil(s.H / CH)).fill(null);
+    dirtyChunks = new Set(chunkMeshes.map(function (m, k) { return k; }));
+  }
+  function markDirty(s, i) {
+    const W = s.W, x = i % W, y = (i / W) | 0;
+    for (let k = 0; k < 9; k++) {
+      const xx = x + ((k % 3) - 1) * 2, yy = y + (((k / 3) | 0) - 1) * 2;
+      if (xx < 0 || yy < 0 || xx >= W || yy >= s.H) continue;
+      dirtyChunks.add(((yy / CH) | 0) * chunkCols + ((xx / CH) | 0));
+    }
+  }
+  function solid(s, i) { return !s.seen[i] || s.tiles[i] < T.FLOOR; }
+  const cornerH = function (vx, vz) { return 1.0 + (TT.hash(vx, vz, 77) - 0.5) * 0.34; };
+
+  // Höhenfaktor eines Felsfelds: harter Fels ragt höher, angegrabene und ausgebeutete Felder sacken ab
+  function tileF(s, i) {
+    if (!s.seen[i]) return 1;
+    const t = s.tiles[i];
+    let f = t === T.ROCK ? 1.1 : 1;
+    if (s.dig[i] > 0) f *= 1 - 0.45 * Math.min(1, s.dig[i] / B.digTime);
+    if (t === T.GOLD) f *= 1 - 0.4 * (1 - s.ore[i] / B.oreGold);
+    return f;
+  }
+  // Höhe und Farbe eines Eckpunkts: Mittel der angrenzenden Felsfelder, damit die Oberfläche ohne Stufen durchläuft
+  function cornerInfo(s, vx, vz, walled) {
+    const W = s.W, H = s.H;
+    let sum = 0, n = 0, clamp = false, r = 0, g = 0, b = 0;
+    for (let dz = -1; dz <= 0; dz++) for (let dx = -1; dx <= 0; dx++) {
+      const xx = vx + dx, zz = vz + dz;
+      if (xx < 0 || zz < 0 || xx >= W || zz >= H) continue;
+      const j = zz * W + xx;
+      if (!solid(s, j)) continue;
+      sum += tileF(s, j); n++;
+      if (walled && walled[j]) clamp = true;
+      const c = s.seen[j] ? TILE_COL[s.tiles[j]] : FOG_COL;
+      const dk = s.seen[j] && s.dig[j] > 0 ? 1 - 0.3 * Math.min(1, s.dig[j] / B.digTime) : 1;
+      r += c[0] * dk; g += c[1] * dk; b += c[2] * dk;
+    }
+    let h = cornerH(vx, vz) * (n ? sum / n : 1);
+    if (clamp) h = Math.min(h, 0.985);
+    const l = (0.9 + TT.hash(vx, vz, 80) * 0.2) / (n || 1);
+    return [h * WH, r * l, g * l, b * l];
+  }
+  // Eckhöhen und Mitte eines Felsfelds: [c0, c1, c2, c3, Mitte]
+  function tileHeights(s, i, walled) {
+    const W = s.W, x = i % W, y = (i / W) | 0, f = tileF(s, i);
+    const h = [cornerInfo(s, x, y, walled)[0], cornerInfo(s, x + 1, y, walled)[0], cornerInfo(s, x + 1, y + 1, walled)[0], cornerInfo(s, x, y + 1, walled)[0]];
+    let c = (h[0] + h[1] + h[2] + h[3]) / 4 + ((TT.hash(x, y, 78) - 0.5) * 0.24 * f + (s.tiles[i] === T.ROCK && s.seen[i] ? 0.06 : 0)) * WH;
+    if (walled && walled[i]) c = Math.min(c, 0.99 * WH);
+    h.push(c);
+    return h;
+  }
+  function peakOf(s, i, walled) { return Math.max.apply(null, tileHeights(s, i, walled)); }
+  function topOf(s, i, walled) { const h = tileHeights(s, i, walled); return (h[0] + h[1] + h[2] + h[3] + 2 * h[4]) / 6; }
+
+  // Steintextur: mehrschichtiges Rauschen mit Rissen, dazu eine passende Reliefkarte (Normalen)
+  function rockTextures() {
+    const N = 256, out = new Float32Array(N * N);
+    const layer = function (p, seed) {
+      const g = new Float32Array(p * p);
+      for (let k = 0; k < p * p; k++) g[k] = TT.hash(k % p, (k / p) | 0, seed);
+      return function (x, y) {                         // kachelbar: Gitter wiederholt sich
+        const fx = x / N * p, fy = y / N * p, x0 = Math.floor(fx), y0 = Math.floor(fy);
+        let tx = fx - x0, ty = fy - y0; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+        const a = g[(y0 % p) * p + (x0 % p)], b = g[(y0 % p) * p + ((x0 + 1) % p)];
+        const c = g[((y0 + 1) % p) * p + (x0 % p)], d = g[((y0 + 1) % p) * p + ((x0 + 1) % p)];
+        return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
+      };
+    };
+    const L = [layer(6, 301), layer(12, 302), layer(24, 303), layer(48, 304), layer(96, 305)], A = [1, 0.55, 0.3, 0.16, 0.08];
+    // Bruchstein: kachelbares Zellmuster. Jede Zelle ist ein Brocken mit eigener Höhe und Helligkeit, an den Grenzen liegen Fugen.
+    const P = 11, cells = [], shade = new Float32Array(N * N);
+    for (let k = 0; k < P * P; k++) cells.push([TT.hash(k % P, (k / P) | 0, 410), TT.hash(k % P, (k / P) | 0, 411), TT.hash(k % P, (k / P) | 0, 412)]);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const fx = x / N * P, fy = y / N * P, gx = Math.floor(fx), gy = Math.floor(fy);
+      let d1 = 9, d2 = 9, id = 0;
+      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+        const ci = (((gy + oy) % P + P) % P) * P + ((gx + ox) % P + P) % P, c = cells[ci];
+        const d = Math.hypot(gx + ox + 0.05 + c[0] * 0.9 - fx, gy + oy + 0.05 + c[1] * 0.9 - fy);
+        if (d < d1) { d2 = d1; d1 = d; id = ci; } else if (d < d2) d2 = d;
+      }
+      let n = 0, tot = 0;
+      for (let k = 0; k < L.length; k++) { n += L[k](x, y) * A[k]; tot += A[k]; }
+      n /= tot;
+      let e = Math.min(1, (d2 - d1) / 0.1); e = e * e * (3 - 2 * e);          // 0 in der Fuge, 1 auf dem Brocken
+      out[y * N + x] = (0.2 + cells[id][2] * 0.45 + n * 0.5) * (0.5 + 0.5 * e);
+      shade[y * N + x] = (0.84 + cells[id][2] * 0.18 + (n - 0.5) * 0.5) * (0.76 + 0.24 * e);
+    }
+    const mk2 = function () { const c = document.createElement("canvas"); c.width = c.height = N; return c; };
+    const cm = mk2(), cn = mk2(), gm = cm.getContext("2d"), gn = cn.getContext("2d");
+    const im = gm.createImageData(N, N), inn = gn.createImageData(N, N);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const k = y * N + x, v = out[k], o = k * 4;
+      const g = Math.max(0, Math.min(255, shade[k] * 0.78 * 255));
+      im.data[o] = g; im.data[o + 1] = g * 0.97; im.data[o + 2] = g * 0.94; im.data[o + 3] = 255;
+      const dx = out[y * N + ((x + 1) % N)] - out[y * N + ((x + N - 1) % N)];
+      const dy = out[((y + 1) % N) * N + x] - out[((y + N - 1) % N) * N + x];
+      let nx = -dx * 6, ny = -dy * 6, nz = 1;
+      const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
+      inn.data[o] = (nx * 0.5 + 0.5) * 255; inn.data[o + 1] = (ny * 0.5 + 0.5) * 255; inn.data[o + 2] = (nz * 0.5 + 0.5) * 255; inn.data[o + 3] = 255;
+    }
+    gm.putImageData(im, 0, 0); gn.putImageData(inn, 0, 0);
+    const map = new THREE.CanvasTexture(cm), nrm = new THREE.CanvasTexture(cn);
+    [map, nrm].forEach(function (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); });
+    map.colorSpace = THREE.SRGBColorSpace;
+    return { map: map, normal: nrm };
+  }
+
+  // Ränder einer Felswand: Ecken (Index in tileHeights) und Richtung nach außen
+  const SIDES = [
+    { d: [0, -1], a: 0, b: 1, ax: [0, 0], bx: [1, 0], out: [0, 0, -1] },
+    { d: [1, 0], a: 1, b: 2, ax: [1, 0], bx: [1, 1], out: [1, 0, 0] },
+    { d: [0, 1], a: 2, b: 3, ax: [1, 1], bx: [0, 1], out: [0, 0, 1] },
+    { d: [-1, 0], a: 3, b: 0, ax: [0, 1], bx: [0, 0], out: [-1, 0, 0] },
+  ];
+
+  function buildChunk(s, ci, walled) {
+    const W = s.W, H = s.H, x0 = (ci % chunkCols) * CH, y0 = ((ci / chunkCols) | 0) * CH;
+    const pos = [], col = [], uv = [], nor = [];
+    // Dreieck anhängen; zeigt die Fläche falsch herum, werden zwei Ecken getauscht.
+    // nn = vorgegebene Normalen (weiche Oberseite), sonst gilt die Flächennormale (kantige Felswand).
+    function tri(p, c, u, want, nn) {
+      const ax = p[3] - p[0], ay = p[4] - p[1], az = p[5] - p[2], bx = p[6] - p[0], by = p[7] - p[1], bz = p[8] - p[2];
+      let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+      const flip = nx * want[0] + ny * want[1] + nz * want[2] < 0;
+      if (flip) { nx = -nx; ny = -ny; nz = -nz; }
+      const ln = Math.hypot(nx, ny, nz) || 1, order = flip ? [0, 2, 1] : [0, 1, 2];
+      for (const k of order) {
+        pos.push(p[k * 3], p[k * 3 + 1], p[k * 3 + 2]);
+        col.push(c[k * 3], c[k * 3 + 1], c[k * 3 + 2]);
+        uv.push(u[k * 2], u[k * 2 + 1]);
+        if (nn) nor.push(nn[k * 3], nn[k * 3 + 1], nn[k * 3 + 2]); else nor.push(nx / ln, ny / ln, nz / ln);
+      }
+    }
+
+    // Erster Durchgang (ein Feld über den Blockrand hinaus): Höhen, Eckfarben und gemittelte Normalen der Oberseite
+    const CW = CH + 3, cInfo = new Array(CW * CW), cNor = new Float32Array(CW * CW * 3), tH = {}, tN = {};
+    const ck = function (vx, vz) { return (vz - y0 + 1) * CW + (vx - x0 + 1); };
+    for (let y = y0 - 1; y <= y0 + CH; y++) for (let x = x0 - 1; x <= x0 + CH; x++) {
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const i = y * W + x;
+      if (!solid(s, i)) continue;
+      const P = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]], hs = [];
+      for (let k = 0; k < 4; k++) {
+        const key = ck(P[k][0], P[k][1]);
+        if (!cInfo[key]) cInfo[key] = cornerInfo(s, P[k][0], P[k][1], walled);
+        hs.push(cInfo[key][0]);
+      }
+      let c = (hs[0] + hs[1] + hs[2] + hs[3]) / 4 + ((TT.hash(x, y, 78) - 0.5) * 0.24 * tileF(s, i) + (s.tiles[i] === T.ROCK && s.seen[i] ? 0.06 : 0)) * WH;
+      if (walled && walled[i]) c = Math.min(c, 0.99 * WH);
+      hs.push(c); tH[i] = hs;
+      const cn = [0, 0, 0];
+      for (let k = 0; k < 4; k++) {
+        const a = P[k], b = P[(k + 1) % 4];
+        const ex = x + 0.5 - a[0], ey = c - hs[k], ez = y + 0.5 - a[1], fx = b[0] - a[0], fy = hs[(k + 1) % 4] - hs[k], fz = b[1] - a[1];
+        let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+        if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        cn[0] += nx; cn[1] += ny; cn[2] += nz;
+        for (const q of [a, b]) { const o = ck(q[0], q[1]) * 3; cNor[o] += nx; cNor[o + 1] += ny; cNor[o + 2] += nz; }
+      }
+      const cl = Math.hypot(cn[0], cn[1], cn[2]) || 1;
+      tN[i] = [cn[0] / cl, cn[1] / cl, cn[2] / cl];
+    }
+    const nAt = function (vx, vz) {
+      const o = ck(vx, vz) * 3, l = Math.hypot(cNor[o], cNor[o + 1], cNor[o + 2]) || 1;
+      return [cNor[o] / l, cNor[o + 1] / l, cNor[o + 2] / l];
+    };
+    const UP = [0, 1, 0], S = 0.3;
+    for (let y = y0; y < Math.min(H, y0 + CH); y++) for (let x = x0; x < Math.min(W, x0 + CH); x++) {
+      const i = y * W + x;
+      if (!solid(s, i)) continue;
+      const h = tH[i], seen = s.seen[i];
+      const base = seen ? TILE_COL[s.tiles[i]] : FOG_COL, tn = 0.9 + TT.hash(x, y, 79) * 0.2;
+      const dk = seen && s.dig[i] > 0 ? 1 - 0.3 * Math.min(1, s.dig[i] / B.digTime) : 1;
+      const cr = base[0] * tn * dk, cg = base[1] * tn * dk, cb = base[2] * tn * dk;
+      // Oberseite: vier Dreiecke zur Mitte. Eckfarben und Normalen teilen sich die Nachbarfelder,
+      // dadurch gehen Gesteinsarten und der Rand zum Unerforschten weich ineinander über.
+      const C = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]], mx = x + 0.5, mz = y + 0.5, nm = tN[i];
+      for (let k = 0; k < 4; k++) {
+        const a = C[k], b = C[(k + 1) % 4], ha = h[k], hb = h[(k + 1) % 4];
+        const ca = cInfo[ck(a[0], a[1])], cb2 = cInfo[ck(b[0], b[1])], na = nAt(a[0], a[1]), nb = nAt(b[0], b[1]);
+        tri([a[0], ha, a[1], mx, h[4], mz, b[0], hb, b[1]],
+          [ca[1], ca[2], ca[3], cr, cg, cb, cb2[1], cb2[2], cb2[3]],
+          [a[0] * S, a[1] * S, mx * S, mz * S, b[0] * S, b[1] * S], UP,
+          [na[0], na[1], na[2], nm[0], nm[1], nm[2], nb[0], nb[1], nb[2]]);
+      }
+      // Felswände zu offenen Nachbarn (nicht dort, wo eine gemauerte Wand davorsteht)
+      for (const sd of SIDES) {
+        const nx = x + sd.d[0], ny = y + sd.d[1];
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const j = ny * W + nx;
+        if (solid(s, j)) continue;
+        if (env && walled && walled[i] && s.tiles[j] === T.CLAIMED) continue;
+        const A = [x + sd.ax[0], y + sd.ax[1]], Bv = [x + sd.bx[0], y + sd.bx[1]], hA = h[sd.a], hB = h[sd.b];
+        const ew = sd.d[0] !== 0;                       // Wand in Ost-West-Richtung: Textur läuft an z entlang
+        // Raster 3 Spalten x 4 Reihen; nur die Mittelspalte wird ausgebeult (keine Spalten an den Ecken)
+        const grid = [];
+        for (let r = 0; r <= 3; r++) for (let c = 0; c <= 2; c++) {
+          const t = c / 2, px = A[0] + (Bv[0] - A[0]) * t, pz = A[1] + (Bv[1] - A[1]) * t, ht = hA + (hB - hA) * t;
+          const py = ht * (1 - r / 3);
+          let d = 0;
+          if (c === 1 && r > 0) d = (TT.hash(Math.round(px * 8), Math.round(pz * 8) + r * 31, 91) - 0.3) * 0.17;
+          if (r === 3) d += 0.03;
+          const vx = px + sd.out[0] * d, vz = pz + sd.out[2] * d;
+          const ao = 0.42 + 0.58 * (ht > 0 ? py / ht : 0), lt = tn * dk * ao * (0.9 + TT.hash(Math.round(vx * 9), Math.round(vz * 9) + r, 92) * 0.18);
+          grid.push([vx, py, vz, base[0] * lt, base[1] * lt, base[2] * lt, (ew ? vz : vx) * S, py * S]);
+        }
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) {
+          const p00 = grid[r * 3 + c], p01 = grid[r * 3 + c + 1], p10 = grid[(r + 1) * 3 + c], p11 = grid[(r + 1) * 3 + c + 1];
+          [[p00, p10, p01], [p01, p10, p11]].forEach(function (q) {
+            tri([q[0][0], q[0][1], q[0][2], q[1][0], q[1][1], q[1][2], q[2][0], q[2][1], q[2][2]],
+              [q[0][3], q[0][4], q[0][5], q[1][3], q[1][4], q[1][5], q[2][3], q[2][4], q[2][5]],
+              [q[0][6], q[0][7], q[1][6], q[1][7], q[2][6], q[2][7]], sd.out);
+          });
+        }
+      }
+    }
+    if (chunkMeshes[ci]) { scene.remove(chunkMeshes[ci]); chunkMeshes[ci].geometry.dispose(); chunkMeshes[ci] = null; }
+    if (!pos.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, rockMat);
+    m.castShadow = true; m.receiveShadow = true;
+    scene.add(m); chunkMeshes[ci] = m;
+  }
+
+  function buildTerrain(s, walled) {
+    if (!rockMat) {
+      const t = rockTextures();
+      rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: t.map, normalMap: t.normal, normalScale: new THREE.Vector2(0.8, 0.8),
+        roughness: 0.9, metalness: 0.02, envMapIntensity: 0.45 });
+    }
+    dirtyChunks.forEach(function (ci) { if (ci >= 0 && ci < chunkMeshes.length) buildChunk(s, ci, walled); });
+    dirtyChunks.clear();
+  }
+
   function rebuildMap(s) {
     const W = s.W, H = s.H, fill = s.gold / TT.goldCap(s);
     MAPSET.forEach(function (k) { mk[k].count = 0; });
@@ -503,18 +770,13 @@
       const t = s.tiles[i];
 
       if (!s.seen[i]) {
-        put(mk.fog, cx, 0, cz, 1, WH * 1.03, 1, rot, tint, tint, tint);
-        if (s.mark[i]) put(mk.mark, cx, 0, cz, 1.03, WH * 1.03 + 0.03, 1.03, 0);
+        if (s.mark[i]) put(mk.mark, cx, peakOf(s, i, walled) - 0.04, cz, 1.0, 0.08, 1.0, 0);
         continue;
       }
       if (t < T.FLOOR) {
-        let hgt = t === T.ROCK ? 1.05 + hv * 0.22 : 0.95 + hv * 0.13, dark = 1;
-        if (env && walled[i]) hgt = 0.97;                   // knapp unter der Mauerkrone, damit die Wand sauber abschließt
-        if (s.dig[i] > 0) { const f = Math.min(1, s.dig[i] / B.digTime); hgt *= 1 - 0.45 * f; dark = 1 - 0.3 * f; }
-        if (t === T.GOLD) hgt *= 1 - 0.4 * (1 - s.ore[i] / B.oreGold);
-        const top = WH * hgt, c = tint * dark;
-        put(t === T.ROCK ? mk.rock : t === T.EARTH ? mk.earth : t === T.GOLD ? mk.gold : mk.gem, cx, 0, cz, 1, top, 1, rot, c, c, c);
-        if (s.mark[i]) put(mk.mark, cx, 0, cz, 1.03, top + 0.03, 1.03, 0);
+        const top = topOf(s, i, walled);
+        void rot; void tint;
+        if (s.mark[i]) put(mk.mark, cx, peakOf(s, i, walled) - 0.04, cz, 1.0, 0.08, 1.0, 0);
         if (t === T.GOLD) {
           goldTiles.push(i);
           for (let k = 0; k < 3; k++) {
@@ -526,15 +788,21 @@
             const a = TT.hash(x, y, 60 + k), b = TT.hash(x, y, 70 + k), sz = 0.7 + a * 0.8;
             put(k % 2 ? mk.shardB : mk.shardA, cx + (a - 0.5) * 0.7, top - 0.06, cz + (b - 0.5) * 0.7, sz, sz * (0.8 + b), sz, a * 6);
           }
-          spots.push([cx, top + 0.25, cz, 2.2, C_TEAL, 0.22, hv * 6]);
+          spots.push([cx, top + 0.25, cz, 1.3, C_TEAL, 0.16, hv * 6]);
         }
         continue;
+      }
+
+      // Kontaktschatten am Fuß der angrenzenden Wände
+      for (let k = 0; k < 4; k++) {
+        const q = TORCH_DIR[k], j = i + q[0] + q[1] * W;
+        if (j >= 0 && j < s.tiles.length && solid(s, j)) put(mk.ao, cx + q[0] * 0.27, 0.012, cz + q[1] * 0.27, 1, 1, 1, q[2]);
       }
 
       // Boden
       const room = s.room[i];
       if (env) {
-        const c = (0.9 + h2 * 0.16) * 0.43;                    // die hellen Steinplatten abdunkeln: es ist ein Dungeon
+        const c = (0.9 + h2 * 0.16) * 0.5;                    // die hellen Steinplatten etwas abdunkeln: es ist ein Dungeon
         if (t === T.FLOOR) {                                  // roher, noch nicht beanspruchter Gang
           put(mk["fDirt" + ((hv * 4) | 0)], cx, FY, cz, 0.5, 0.5, 0.5, rot, c * 0.9, c * 0.84, c * 0.86);
           if (TT.hash(x, y, 35) < 0.05) put(mk.rubble, cx - 0.2, 0, cz + (h2 - 0.5) * 0.3, 0.1, 0.1, 0.1, hv * 6);
@@ -589,7 +857,7 @@
           const sz = 0.85 + TT.hash(x, y, 20 + k) * 0.6, mx = cx + MUSH[k][0] + (TT.hash(x, y, 80 + k) - 0.5) * 0.1, mz = cz + MUSH[k][1];
           put(mk.mushStem, mx, 0, mz, sz, sz, sz, 0);
           put(mk.mushCap, mx, 0, mz, sz, sz, sz, hv * 6);
-          spots.push([mx, 0.2 * sz, mz, 0.75 * sz, C_MUSH, 0.3, h2 * 6 + k]);
+          spots.push([mx, 0.2 * sz, mz, 0.42 * sz, C_MUSH, 0.2, h2 * 6 + k]);
         }
       } else if (room === ID.treasury) {
         const nP = fill > 0.02 ? Math.max(1, Math.min(5, Math.round(fill * 5 + hv - 0.5))) : 0;
@@ -645,6 +913,7 @@
     }
     MAPSET.forEach(function (k) { done(mk[k]); });
     for (let id = 1; id < mk.roomFloor.length; id++) done(mk.roomFloor[id]);
+    buildTerrain(s, walled);
   }
 
   /* ============================================================
@@ -1048,7 +1317,7 @@
   }
   function syncLights(s, v, time) {
     const weak = s.coreHp / B.coreHp < 0.35;
-    setLight(lights[0], tx(s, s.coreIdx), tz(s, s.coreIdx), weak ? 0xff6a4a : 0x4ff0dc, 15 + Math.sin(time * 2.2) * 3, 9, 1.4);
+    setLight(lights[0], tx(s, s.coreIdx), tz(s, s.coreIdx), weak ? 0xff6a4a : 0x4ff0dc, 11 + Math.sin(time * 2.2) * 2.5, 10, 1.4);
     if (s.seen[s.rift.idx]) setLight(lights[1], tx(s, s.rift.idx), tz(s, s.rift.idx), 0xa060ff, s.rift.on ? 26 : 6, 8, 1);
     else lights[1].intensity = 0;
 
@@ -1064,7 +1333,7 @@
       pt(glowPts, e.x, 0.65, e.y, 2.0, C_FIRE, 0.06);
     }
     for (const sh of s.shafts) if (s.seen[sh]) cand.push([tx(s, sh), tz(s, sh), 0xffdca0, 12, 6, Math.hypot(tx(s, sh) - v.cx, tz(s, sh) - v.cy) + 3]);
-    for (const q of torches) cand.push([q[0], q[1], 0xff8a3c, 7.5 + Math.sin(time * 11 + q[2]) * 1.2, 5.5, Math.hypot(q[0] - v.cx, q[1] - v.cy) + 1.5, 0.95]);
+    for (const q of torches) cand.push([q[0], q[1], 0xff9a4c, 7.5 + Math.sin(time * 11 + q[2]) * 1.2, 7, Math.hypot(q[0] - v.cx, q[1] - v.cy) + 1.5, 0.95]);
     for (const q of lightSpots) cand.push([q[0], q[1], q[2], q[3] + Math.sin(time * 8 + q[0]) * 1.5, q[4], Math.hypot(q[0] - v.cx, q[1] - v.cy) + 2]);
     for (const q of s.seals || []) if (s.seen[q.idx]) cand.push([tx(s, q.idx), tz(s, q.idx), q.taken ? 0xa060ff : 0xffdc9a, 9, 5, Math.hypot(tx(s, q.idx) - v.cx, tz(s, q.idx) - v.cy) + 1]);
     cand.sort(function (a, b) { return a[5] - b[5]; });
@@ -1124,10 +1393,10 @@
     // Wandfackeln: flackernde Flamme, Lichtschein am Boden, ab und zu ein Funke
     for (const q of torches) {
       const fl = 0.8 + 0.2 * Math.sin(time * 11 + q[2]) * Math.sin(time * 7.3 + q[2] * 2);
-      pt(glowPts, q[0], q[3] + 0.1, q[1], 0.62 * (0.9 + 0.1 * fl), C_FLAME, 0.95, FLAME);      // Flamme
-      pt(glowPts, q[0], q[3] + 0.07, q[1], 0.36 * fl, C_FLAME_IN, 0.9, FLAME);                  // heller Kern
-      pt(glowPts, q[0], q[3], q[1], 1.2 * fl, C_FIRE, 0.28);                                    // Lichthof
-      pt(glowPts, q[0], 0.3, q[1], 3.4, C_FIRE, 0.13 * fl);                                     // Schein am Boden
+      pt(glowPts, q[0], q[3] + 0.1, q[1], 0.46 * (0.9 + 0.1 * fl), C_FLAME, 0.9, FLAME);       // Flamme
+      pt(glowPts, q[0], q[3] + 0.07, q[1], 0.26 * fl, C_FLAME_IN, 0.8, FLAME);                  // heller Kern
+      pt(glowPts, q[0], q[3], q[1], 0.95 * fl, C_FIRE, 0.14);                                   // Lichthof
+      pt(glowPts, q[0], 0.3, q[1], 2.8, C_FIRE, 0.08 * fl);                                     // Schein am Boden
     }
     // Kerzen und Kohlebecken
     for (const q of flames) {
@@ -1189,7 +1458,7 @@
     camera.lookAt(v.cx, 0, v.cy);
     camera.updateMatrixWorld();
     pxScale = v.h / (2 * Math.tan(FOV * PI / 360));
-    scene.fog.density = 0.6 / camDist;
+    scene.fog.density = 0.4 / camDist;
 
     // Das Schattenlicht folgt der Kamera
     const half = TT.clamp(camDist * 1.15, 14, 36), sc = sun.shadow.camera;
@@ -1317,7 +1586,7 @@
       let txt = "", col = "";
       if (e.st === "act" && e.act === "sleep") { txt = "z z"; col = "#c9c2ff"; }
       else if (!e.foe && !e.worker && e.mood < 25) { txt = "!"; col = "#ff6a55"; }
-      else if (e.lvl > 1) { txt = String(e.lvl); col = e.foe ? "#ffcf8a" : "#b9fff2"; }
+      else if (e.lvl > 1 && (e.boss || (ui && ui.sel === e.id))) { txt = "Stufe " + e.lvl; col = e.foe ? "#ffcf8a" : "#b9fff2"; }
       if (txt) {
         ctx.font = "bold " + fs + "px 'Segoe UI', sans-serif";
         ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.8)"; ctx.strokeText(txt, p[0], y - 2);

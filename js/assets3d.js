@@ -62,8 +62,8 @@
         if (!tex) {
           // Monsterfarben: entsättigt und abgedunkelt, damit die Horde finster statt knuffig wirkt
           const c = m.material.color, n = g.attributes.position.count, arr = new Float32Array(n * 3);
-          const l = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b, k = 0.82;
-          const r = (l + (c.r - l) * 0.62) * k, gg = (l + (c.g - l) * 0.62) * k, b = (l + (c.b - l) * 0.62) * k;
+          const l = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b, k = 0.98;
+          const r = (l + (c.r - l) * 0.8) * k, gg = (l + (c.g - l) * 0.8) * k, b = (l + (c.b - l) * 0.8) * k;
           for (let i = 0; i < n; i++) { arr[i * 3] = r; arr[i * 3 + 1] = gg; arr[i * 3 + 2] = b; }
           g.setAttribute("color", new THREE.BufferAttribute(arr, 3));
         }

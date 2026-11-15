@@ -28,9 +28,9 @@ Es gibt zwei Ansichten, zwischen denen du jederzeit mit **V** wechselst:
   von game-icons.net; Herkunft und Lizenzen stehen in `assets/QUELLEN.md`.
 - **2D**: die flache Kartenansicht.
 
-Der Look ist bewusst düster: kaum Grundlicht, Fackeln, Glut und Kristalle als eigentliche
-Lichtquellen, kalter Nebel, dazu eine Nachbearbeitung mit Leuchten, gedämpften Farben,
-Abdunklung zum Rand und feinem Filmkorn. Im Hintergrund läuft eine leise Geräuschkulisse
+Der Look ist bewusst düster: zerklüftete, zusammenhängende Felsmasse statt Klötzen, weiche Schatten am Wandfuß, kühles Grundlicht, Fackeln, Glut und Kristalle als warme
+Lichtquellen, kalter Nebel, dazu eine Nachbearbeitung mit Leuchten, leicht gedämpften Farben,
+Abdunklung zum Rand, feinem Filmkorn und Kantenglättung. Im Hintergrund läuft eine leise Geräuschkulisse
 aus Grollen und Tropfen. Auf langsamen Rechnern schaltet sich das Leuchten von selbst ab.
 
 ## Starten
