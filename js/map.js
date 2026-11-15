@@ -3,6 +3,51 @@
 (function () {
   const T = TT.T;
 
+  /* ---------- Mehrspieler: Spielerkontext, Besitz und Feindschaft ----------
+     Auf der gemeinsamen Karte hat jeder Spieler eigenes Gold, eigene Forschung, eigenen Herzkern,
+     eigenes Sichtfeld und eigene Grabmarkierungen. Sie liegen in s.pl[0] und s.pl[1].
+     Der Spieler, für den gerade gerechnet wird (s.me), steht zusätzlich oben in s – so bleibt
+     der übrige Code unverändert: s.gold ist immer das Gold des Spielers, der gerade dran ist.
+     Im Einzelspiel gibt es s.pl nicht; dann ändert sich nichts. */
+  TT.PF = ["gold", "ess", "parts", "research", "coreIdx", "coreHp", "coreHitT", "coreMsgT", "coreLow", "rift", "rally", "rallyN",
+    "payT", "gateT", "stats", "seen", "mark", "msgs", "_rc", "_claimed", "_foes", "_alarm"];
+  TT.bind = function (s, k) {
+    const prev = s.me;
+    if (!s.pl || prev === k) return prev;
+    const P = s.pl[prev], Q = s.pl[k], F = TT.PF;
+    for (let j = 0; j < F.length; j++) P[F[j]] = s[F[j]];
+    for (let j = 0; j < F.length; j++) s[F[j]] = Q[F[j]];
+    s.me = k;
+    return prev;
+  };
+  // Den gerade aktiven Spieler nach s.pl zurückschreiben (vor dem Speichern oder Senden)
+  TT.syncPl = function (s) {
+    if (!s.pl) return;
+    const P = s.pl[s.me], F = TT.PF;
+    for (let j = 0; j < F.length; j++) P[F[j]] = s[F[j]];
+  };
+  // fn im Kontext von Spieler k ausführen
+  TT.inCtx = function (s, k, fn) {
+    if (!s.pl || k === s.me) return fn();
+    const prev = TT.bind(s, k);
+    try { return fn(); } finally { TT.bind(s, prev); }
+  };
+  // Gehört das Feld dem Spieler, der gerade dran ist?
+  TT.mine = function (s, i) { return s.tiles[i] === T.CLAIMED && (!s.own || s.own[i] === s.me + 1); };
+  // Gehört das Feld dem Gegenspieler?
+  TT.theirs = function (s, i) { return !!s.own && s.tiles[i] === T.CLAIMED && s.own[i] !== 0 && s.own[i] !== s.me + 1; };
+  TT.isCore = function (s, i) {
+    if (i === s.coreIdx) return true;
+    if (s.pl) for (let k = 0; k < s.pl.length; k++) if (s.pl[k].coreIdx === i) return true;
+    return false;
+  };
+  // Stehen a und b auf verschiedenen Seiten?
+  TT.enemies = function (a, b) { return a.foe !== b.foe || (!a.foe && a.pl !== b.pl); };
+  // Ist e ein Feind des Spielers, der gerade dran ist (bzw. des Betrachters)?
+  TT.hostile = function (s, e) { return e.foe || (!!s.pl && e.pl !== s.me); };
+  // Gehört e dem Spieler, der gerade dran ist?
+  TT.ownEnt = function (s, e) { return !e.foe && (!s.pl || e.pl === s.me); };
+
   /* ---------- Neues Spiel ---------- */
   /* opts (alle freiwillig): W, H, gold, shafts, firstWave, levelId,
        seals = Anzahl Siegelsteine, guards = Wachen je Siegelstein, guardLvl = deren Stufe */
@@ -160,7 +205,7 @@
   };
 
   /* ---------- Feldabfragen ---------- */
-  TT.walkable = function (s, i) { return s.tiles[i] >= T.FLOOR && i !== s.coreIdx; };
+  TT.walkable = function (s, i) { return s.tiles[i] >= T.FLOOR && !TT.isCore(s, i); };
   TT.tileOf = function (s, e) { return (e.y | 0) * s.W + (e.x | 0); };
 
   // Nebel lüften
@@ -181,6 +226,14 @@
 
   // Ein Feld gehört jetzt dir
   TT.claimTile = function (s, i) {
+    if (s.own) {
+      if (s.own[i] && s.own[i] !== s.me + 1) {             // feindlicher Boden wird übernommen: Fallen und Türen zerbrechen
+        if (s.obj[i]) TT.removeTrap(s, i);
+        const other = s.me === 0 ? 1 : 0;
+        if (s.room[i]) TT.inCtx(s, other, function () { TT.msg(s, "Dein Rivale hat dir ein Feld deiner " + TT.ROOMS[s.room[i]].name + " entrissen!", "bad"); });
+      }
+      s.own[i] = s.me + 1;
+    }
     s.tiles[i] = T.CLAIMED;
     TT.reveal(s, i, 3);
     for (const seal of s.seals || []) if (seal.idx === i && !seal.taken) TT.sealTaken(s, seal);
@@ -195,18 +248,21 @@
   /* ---------- Wegfindung ----------
      flood(): Breitensuche über begehbare Felder ab einem Startfeld.
      Liefert Entfernungen (-1 = unerreichbar) und Vorgänger zum Zurückverfolgen. */
-  TT.flood = function (s, start, foe) {
+  // foe = true: alle Türen sperren (Eindringlinge). noEnemyDoors: Türen des Gegenspielers sperren (Wühler auf der gemeinsamen Karte).
+  TT.flood = function (s, start, foe, noEnemyDoors) {
     const n = s.tiles.length, W = s.W;
     const dist = new Int16Array(n).fill(-1), prev = new Int32Array(n).fill(-1), q = new Int32Array(n);
     const tiles = s.tiles, obj = s.obj, core = s.coreIdx;
+    const core2 = s.pl ? s.pl[s.me === 0 ? 1 : 0].coreIdx : -1, own = noEnemyDoors && s.own ? s.own : null, me1 = s.me + 1;
     let h = 0, t = 0;
     dist[start] = 0; q[t++] = start;
     while (h < t) {
       const c = q[h++], d = dist[c] + 1;
       for (let k = 0; k < 4; k++) {
         const a = c + (k === 0 ? 1 : k === 1 ? -1 : k === 2 ? W : -W);
-        if (a < 0 || a >= n || dist[a] !== -1 || tiles[a] < 4 || a === core) continue;
+        if (a < 0 || a >= n || dist[a] !== -1 || tiles[a] < 4 || a === core || a === core2) continue;
         if (foe && obj[a] === 1) continue;           // Türen halten Eindringlinge auf
+        if (own && obj[a] === 1 && own[a] !== me1) continue;
         dist[a] = d; prev[a] = c; q[t++] = a;
       }
     }

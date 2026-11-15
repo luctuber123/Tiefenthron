@@ -13,6 +13,7 @@
   let frame = 0, pxScale = 1000, camDist = 20, spots = [], goldTiles = [], lightSpots = [], torches = [], flames = [];
   // Wo Kreaturen stehen, die sich ein Feld teilen (damit sie nicht ineinander stecken)
   const SLOTS = [[0, 0], [0.27, 0.1], [-0.27, 0.1], [0.08, -0.28], [-0.13, 0.3], [0.3, -0.2], [-0.3, -0.18]];
+  let coreGrp2 = null, crystal2 = null, riftGrp2 = null, riftRings2 = [];      // gemeinsame Karte: Herzkern und Riss des Rivalen
   let tutArrow = null, coreGrp, crystal, riftGrp, riftRings = [], riftOn = null, shaftObjs = [], sealObjs = [], banner, selRing, spellRing, spellDisc;
   let glowPts, dustPts, parts = [], rings = [], bolts = [], prisoners = [];
   let rq = 0, slow = 0, composer = null, bloom = null, grade = null, postW = 0, postH = 0;                  // Renderqualität (1 = volle Auflösung) und Zähler für zu langsame Bilder
@@ -354,6 +355,14 @@
     }
     scene.add(riftGrp);
 
+    // Herzkern und Riss des Rivalen (nur auf der gemeinsamen Karte sichtbar): rot glühender Kristall
+    mat.crystal2 = mat.crystal.clone();
+    mat.crystal2.color.setHex(0xff9a8a); mat.crystal2.emissive.setHex(0xc8302a);
+    coreGrp2 = coreGrp.clone(); crystal2 = coreGrp2.children[2]; crystal2.material = mat.crystal2;
+    coreGrp2.visible = false; scene.add(coreGrp2);
+    riftGrp2 = riftGrp.clone(); riftRings2 = riftGrp2.children.slice(1);
+    riftGrp2.visible = false; scene.add(riftGrp2);
+
     // Tutorial-Pfeil: zeigt von oben auf das nächste Ziel
     tutArrow = new THREE.Group();
     const am = new THREE.MeshBasicMaterial({ color: 0xffcf5a, toneMapped: false });
@@ -420,7 +429,8 @@
       const t = s.tiles[i];
       const dq = s.dig[i] > 0 ? Math.min(3, 1 + ((s.dig[i] / B.digTime * 3) | 0)) : 0;
       const oq = t === T.GOLD ? 3 - Math.min(3, (s.ore[i] / B.oreGold * 3.99) | 0) : 0;
-      const v = t | (s.room[i] << 3) | (s.seen[i] << 7) | (s.mark[i] << 8) | (dq << 9) | (oq << 11) | (s.food[i] << 13);
+      const v = t | (s.room[i] << 3) | (s.seen[i] << 7) | (s.mark[i] << 8) | (dq << 9) | (oq << 11) | (s.food[i] << 13) |
+        ((s.own && s.own[i] && s.own[i] !== s.me + 1 ? 1 : 0) << 15);
       if (sig[i] !== v) { sig[i] = v; ch = true; markDirty(s, i); }
     }
     const fq = Math.round(s.gold / TT.goldCap(s) * 5);
@@ -801,6 +811,8 @@
 
       // Boden
       const room = s.room[i];
+      // Boden des Rivalen: rötlich, damit die Front auf einen Blick zu sehen ist
+      const en = !!s.own && t === T.CLAIMED && s.own[i] !== 0 && s.own[i] !== s.me + 1, er = en ? 1.35 : 1, eg = en ? 0.7 : 1, eb = en ? 0.66 : 1;
       if (env) {
         const c = (0.9 + h2 * 0.16) * 0.5;                    // die hellen Steinplatten etwas abdunkeln: es ist ein Dungeon
         if (t === T.FLOOR) {                                  // roher, noch nicht beanspruchter Gang
@@ -808,12 +820,12 @@
           if (TT.hash(x, y, 35) < 0.05) put(mk.rubble, cx - 0.2, 0, cz + (h2 - 0.5) * 0.3, 0.1, 0.1, 0.1, hv * 6);
         } else if (!room) {                                   // dein Boden: Steinplatten, ab und zu gesprungen oder bewachsen
           const r = TT.hash(x, y, 33);
-          put(r < 0.06 ? mk.fBrokA : r < 0.12 ? mk.fBrokB : r < 0.16 ? mk.fWeeds : mk.fTile, cx, FY, cz, 0.5, 0.5, 0.5, rot, c, c, c);
+          put(r < 0.06 ? mk.fBrokA : r < 0.12 ? mk.fBrokB : r < 0.16 ? mk.fWeeds : mk.fTile, cx, FY, cz, 0.5, 0.5, 0.5, rot, c * er, c * eg, c * eb);
         } else {
           const f = ROOM_FLOOR[room], dirt = f[0] === "dirt";
-          put(dirt ? mk["fDirt" + ((hv * 4) | 0)] : mk[f[0]], cx, FY, cz, 0.5, 0.5, 0.5, dirt ? rot : 0, f[1] * c, f[2] * c, f[3] * c);
+          put(dirt ? mk["fDirt" + ((hv * 4) | 0)] : mk[f[0]], cx, FY, cz, 0.5, 0.5, 0.5, dirt ? rot : 0, f[1] * c * er, f[2] * c * eg, f[3] * c * eb);
         }
-      } else put(t === T.CLAIMED ? (room ? mk.roomFloor[room] : mk.claimed) : mk.dirt, cx, 0, cz, 1, 1, 1, room ? 0 : rot, tint, tint, tint);
+      } else put(t === T.CLAIMED ? (room ? mk.roomFloor[room] : mk.claimed) : mk.dirt, cx, 0, cz, 1, 1, 1, room ? 0 : rot, tint * er, tint * eg, tint * eb);
       if (s.mark[i]) put(mk.mark, cx, 0, cz, 1.03, 0.06, 1.03, 0);
 
       // Wände, Fackeln und Wandschmuck rund um dein Reich
@@ -1009,7 +1021,10 @@
   }
 
   const bandGeo = new THREE.TorusGeometry(0.3, 0.025, 6, 24);
-  let bandMat = null;
+  let bandMat = null, bandRed = null;
+  // Gemeinsame Karte: Kreaturen des Rivalen im Nebel bleiben verborgen
+  function hiddenFoe(s, e) { return !!s.pl && e.pl !== s.me && !e.foe && !s.seen[TT.tileOf(s, e)]; }
+  V3.hiddenFoe = hiddenFoe;
 
   function animate(o, e, s, time, dt) {
     const def = TT.CREATURES[e.type], md = o.md;
@@ -1059,6 +1074,10 @@
       if (o.body.material !== m) { o.body.material = m; if (o.armMesh) o.armMesh.material = m; }
     }
     if (o.extra) o.extra.visible = e.carry > 0;
+    if (s.pl && !e.foe && e.pl !== s.me && !o.band) {      // Kreaturen des Rivalen tragen einen roten Ring
+      if (!bandRed) bandRed = new THREE.MeshBasicMaterial({ color: 0xff3a2a, toneMapped: false });
+      o.band = new THREE.Mesh(bandGeo, bandRed); o.band.rotation.x = PI / 2; o.band.position.y = 0.03; o.band.scale.setScalar(1.15); o.g.add(o.band);
+    }
     if (e.conv && !o.band) {                     // Überläufer tragen einen violetten Ring
       if (!bandMat) bandMat = new THREE.MeshBasicMaterial({ color: 0xb06cff, toneMapped: false });
       o.band = new THREE.Mesh(bandGeo, bandMat); o.band.rotation.x = PI / 2; o.band.position.y = 0.03; o.g.add(o.band);
@@ -1087,7 +1106,7 @@
   function syncEnts(s, time, dt) {
     const used = {};
     for (const e of s.ents) {
-      if (e.held || e.dead) continue;
+      if (e.held || e.dead || hiddenFoe(s, e)) continue;
       let o = ents.get(e.id);
       // neu anlegen, wenn es die Kreatur noch nicht gibt – oder ihr fertiges Modell inzwischen geladen ist
       if (!o || o.type !== e.type || (!o.model && TT.A3 && TT.A3.has(e.type))) {
@@ -1150,6 +1169,27 @@
       const a = Math.random() * TAU, rr = 0.15 + Math.random() * 0.3;
       emit(true, riftGrp.position.x + Math.cos(a) * rr, 0.1, riftGrp.position.z + Math.sin(a) * rr, -Math.sin(a) * 0.5, 0.7 + Math.random() * 0.6, Math.cos(a) * 0.5, 1.2, 0.14, C_VIO, -0.3);
     }
+
+    // Gemeinsame Karte: Herzkern und Riss des Rivalen, sobald man sie gesehen hat
+    if (s.pl) {
+      const o = s.pl[1 - s.me];
+      coreGrp2.visible = !!s.seen[o.coreIdx];
+      if (coreGrp2.visible) {
+        coreGrp2.position.set(tx(s, o.coreIdx), 0, tz(s, o.coreIdx));
+        crystal2.position.y = 0.62 + Math.sin(time * 1.4 + 1) * 0.05;
+        crystal2.rotation.y = -time * 0.5;
+        const hit2 = s.time - o.coreHitT < 0.25;
+        mat.crystal2.emissive.setHex(hit2 ? 0xffffff : 0xc8302a);
+        mat.crystal2.emissiveIntensity = hit2 ? 2.5 : 1.1 + Math.sin(time * 2.6) * 0.25;
+        if (Math.random() < dt * 5) emit(true, coreGrp2.position.x + (Math.random() - 0.5) * 0.7, 0.3, coreGrp2.position.z + (Math.random() - 0.5) * 0.7, 0, 0.5 + Math.random() * 0.4, 0, 1.6, 0.12, [1, 0.35, 0.25], -0.2);
+        pt(glowPts, coreGrp2.position.x, 0.7, coreGrp2.position.z, 4, [1, 0.3, 0.22], 0.14 + Math.sin(time * 2.6) * 0.04);
+      }
+      riftGrp2.visible = !!s.seen[o.rift.idx];
+      if (riftGrp2.visible) {
+        riftGrp2.position.set(tx(s, o.rift.idx), 0, tz(s, o.rift.idx));
+        riftRings2.forEach(function (r, k) { r.material = o.rift.on ? mat.rift : mat.riftOff; r.rotation.z = time * (o.rift.on ? 1.2 + k * 0.5 : 0.25) * (k % 2 ? 1 : -1) + k; });
+      }
+    } else if (coreGrp2) { coreGrp2.visible = false; riftGrp2.visible = false; }
 
     // Schächte
     while (shaftObjs.length < s.shafts.length) {
@@ -1333,6 +1373,10 @@
       pt(glowPts, e.x, 0.65, e.y, 2.0, C_FIRE, 0.06);
     }
     for (const sh of s.shafts) if (s.seen[sh]) cand.push([tx(s, sh), tz(s, sh), 0xffdca0, 12, 6, Math.hypot(tx(s, sh) - v.cx, tz(s, sh) - v.cy) + 3]);
+    if (s.pl) {
+      const o = s.pl[1 - s.me];
+      if (s.seen[o.coreIdx]) cand.push([tx(s, o.coreIdx), tz(s, o.coreIdx), 0xff5a44, 11, 9, Math.hypot(tx(s, o.coreIdx) - v.cx, tz(s, o.coreIdx) - v.cy), 1.4]);
+    }
     for (const q of torches) cand.push([q[0], q[1], 0xff9a4c, 7.5 + Math.sin(time * 11 + q[2]) * 1.2, 7, Math.hypot(q[0] - v.cx, q[1] - v.cy) + 1.5, 0.95]);
     for (const q of lightSpots) cand.push([q[0], q[1], q[2], q[3] + Math.sin(time * 8 + q[0]) * 1.5, q[4], Math.hypot(q[0] - v.cx, q[1] - v.cy) + 2]);
     for (const q of s.seals || []) if (s.seen[q.idx]) cand.push([tx(s, q.idx), tz(s, q.idx), q.taken ? 0xa060ff : 0xffdc9a, 9, 5, Math.hypot(tx(s, q.idx) - v.cx, tz(s, q.idx) - v.cy) + 1]);
@@ -1511,7 +1555,7 @@
     syncCamera(v, ui);
     let best = null, bd = 1e9;
     for (const e of s.ents) {
-      if (e.held || e.dead || (ownOnly && e.foe)) continue;
+      if (e.held || e.dead || (ownOnly && !TT.ownEnt(s, e)) || hiddenFoe(s, e)) continue;
       const o = ents.get(e.id), md = o ? o.md : M.creature(e.type), p = V3.project(v, e.x, md.hover + md.h * 0.5, e.y);
       if (!p) continue;
       const d = Math.hypot(p[0] - mx, p[1] - my) / p[2];
@@ -1579,7 +1623,7 @@
       let y = p[1];
       if (e.hp < mx) {
         ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(p[0] - w / 2 - 1, y - h - 1, w + 2, h + 2);
-        ctx.fillStyle = e.foe ? "#ff6a55" : "#7dffb0"; ctx.fillRect(p[0] - w / 2, y - h, w * Math.max(0, e.hp / mx), h);
+        ctx.fillStyle = TT.hostile(s, e) ? "#ff6a55" : "#7dffb0"; ctx.fillRect(p[0] - w / 2, y - h, w * Math.max(0, e.hp / mx), h);
         y -= h + 3;
       }
       const fs = TT.clamp(Math.round(u * 0.17), 10, 20);

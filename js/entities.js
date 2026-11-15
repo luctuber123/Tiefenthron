@@ -16,6 +16,7 @@
       haste: 0, stun: 0, hurt: 0, held: false, dead: false, gone: false,
       dir: 1, lt: -1, mv: false, ph: Math.random() * 6.28,
     };
+    if (s.pl && !foe) e.pl = s.me;                       // gemeinsame Karte: gehört dem Spieler, der gerade dran ist
     e.hp = TT.maxHp(s, e);
     s.ents.push(e);
     return e;
@@ -28,7 +29,8 @@
 
   TT.maxHp = function (s, e) {
     const def = TT.CREATURES[e.type];
-    return Math.round(def.hp * (1 + 0.15 * (e.lvl - 1)) * (e.hpx || 1) * (!e.foe && s.research.done.deep ? 1.25 : 1));
+    const R = s.pl && !e.foe && s.pl[e.pl] && e.pl !== s.me ? s.pl[e.pl].research : s.research;
+    return Math.round(def.hp * (1 + 0.15 * (e.lvl - 1)) * (e.hpx || 1) * (!e.foe && R.done.deep ? 1.25 : 1));
   };
 
   TT.wageOf = function (e) {
@@ -52,8 +54,25 @@
   function followPath(s, e, dt, def) {
     if (!e.path.length) return true;
     const i = e.path[0];
+    if (s.own && !e.foe && s.obj[i] === TT.OBJ.DOOR && s.own[i] && s.own[i] !== e.pl + 1) { bashDoor(s, e, i, def); return false; }
     if (moveToward(e, (i % s.W) + 0.5, ((i / s.W) | 0) + 0.5, speedOf(e, def) * dt)) e.path.shift();
     return e.path.length === 0;
+  }
+
+  // Gemeinsame Karte: eine feindliche Tür einschlagen
+  function bashDoor(s, e, i, def) {
+    e.dir = (i % s.W) + 0.5 >= e.x ? 1 : -1;
+    if (e.cd > 0 || !def.dmg) return;
+    e.cd = def.cd;
+    const tr = TT.trapAt(s, i);
+    s.fx.push({ k: "hit", x: (i % s.W) + 0.5, y: ((i / s.W) | 0) + 0.5, t: 0.18, d: 0.18 });
+    TT.sfx("hit");
+    if (!tr) { s.obj[i] = 0; return; }
+    tr.hp -= def.dmg * (def.doorMult || 1) * (1 + 0.12 * (e.lvl - 1));
+    if (tr.hp <= 0) {
+      TT.removeTrap(s, i);
+      TT.inCtx(s, s.own[i] - 1, function () { TT.msg(s, "Eine deiner Türen wurde eingeschlagen!", "bad"); });
+    }
   }
 
   /* ---------- Kampf ---------- */
@@ -84,7 +103,7 @@
     if (def.cleave) {
       // Rundumschlag: trifft alle Gegner in Reichweite
       for (const o of s.ents) {
-        if (o !== t && o.foe !== a.foe && !o.dead && !o.held && Math.hypot(o.x - a.x, o.y - a.y) <= def.range + 0.3) TT.damage(s, o, dmg * 0.5, a);
+        if (o !== t && TT.enemies(o, a) && !o.dead && !o.held && Math.hypot(o.x - a.x, o.y - a.y) <= def.range + 0.3) TT.damage(s, o, dmg * 0.5, a);
       }
     }
     TT.damage(s, t, dmg, a);
@@ -119,6 +138,14 @@
           break;
         }
       }
+    } else if (s.pl) {
+      // Gemeinsame Karte: Verlust beim Besitzer, Sieg beim Gegenspieler verbuchen
+      if (by && !by.foe && s.pl[by.pl]) s.pl[by.pl].stats.kills++;
+      TT.inCtx(s, e.pl, function () {
+        s.stats.lost++;
+        TT.msg(s, def.name + (e.worker ? " wurde erschlagen." : " ist gefallen."), "bad");
+        TT.sfx("death");
+      });
     } else {
       s.stats.lost++;
       TT.msg(s, def.name + (e.worker ? " wurde erschlagen." : " ist gefallen."), "bad");
@@ -157,7 +184,7 @@
     const W = s.W;
     let best = -1, bd = 1e9;
     for (let i = 0; i < s.room.length; i++) {
-      if (s.room[i] === ID.treasury && fl.dist[i] >= 0 && fl.dist[i] < bd) { bd = fl.dist[i]; best = i; }
+      if (s.room[i] === ID.treasury && fl.dist[i] >= 0 && fl.dist[i] < bd && TT.mine(s, i)) { bd = fl.dist[i]; best = i; }
     }
     const nb = [1, -1, W, -W];
     for (let k = 0; k < 4; k++) {
@@ -172,8 +199,10 @@
 
   function findJob(s, e) {
     const W = s.W, tiles = s.tiles, mark = s.mark;
-    const fl = TT.flood(s, TT.tileOf(s, e), false), dist = fl.dist;
+    const fl = TT.flood(s, TT.tileOf(s, e), false, true), dist = fl.dist;
     const full = s.gold >= TT.goldCap(s);
+    const mine = function (j) { return TT.mine(s, j); };
+    const otherRift = s.pl ? s.pl[s.me === 0 ? 1 : 0].rift.idx : -1;     // den Riss des Rivalen kann man nicht übernehmen
     if (e.carry >= B.carryMax && !full && goDeliver(s, e, fl)) return;
 
     // Was erledigen die anderen Wühler schon?
@@ -193,9 +222,9 @@
           const a = i + (k === 0 ? 1 : k === 1 ? -1 : k === 2 ? W : -W), d = dist[a];
           if (d >= 0 && d < bc) { bc = d; best = { kind: "dig", idx: i, at: a }; }
         }
-      } else if (t === T.FLOOR && dist[i] >= 0 && !resv[i]) {
-        if (tiles[i + 1] === T.CLAIMED || tiles[i - 1] === T.CLAIMED || tiles[i + W] === T.CLAIMED || tiles[i - W] === T.CLAIMED) {
-          const d = dist[i] + 2;
+      } else if ((t === T.FLOOR || TT.theirs(s, i)) && dist[i] >= 0 && !resv[i] && i !== otherRift && !TT.isCore(s, i)) {
+        if (mine(i + 1) || mine(i - 1) || mine(i + W) || mine(i - W)) {
+          const d = dist[i] + (t === T.FLOOR ? 2 : 6);           // feindlichen Boden übernehmen dauert länger
           if (d < bc) { bc = d; best = { kind: "claim", idx: i, at: i }; }
         }
       }
@@ -207,7 +236,7 @@
     if (Math.random() < 0.2) {
       const me = TT.tileOf(s, e);
       const g = me + Math.round((Math.random() - 0.5) * 6) + Math.round((Math.random() - 0.5) * 6) * W;
-      if (g > 0 && g < tiles.length && dist[g] >= 0 && tiles[g] === T.CLAIMED) { e.path = TT.pathTo(fl, g); e.st = "wander"; }
+      if (g > 0 && g < tiles.length && dist[g] >= 0 && mine(g)) { e.path = TT.pathTo(fl, g); e.st = "wander"; }
     }
   }
 
@@ -237,9 +266,10 @@
         if (e.carry >= B.carryMax || s.tiles[i] >= T.FLOOR) endJob(e);
       }
     } else if (j.kind === "claim") {
-      if (s.tiles[i] !== T.FLOOR) { endJob(e); return; }
+      const enemy = TT.theirs(s, i);
+      if (s.tiles[i] !== T.FLOOR && !enemy) { endJob(e); return; }
       e.t += dt;
-      if (e.t >= B.claimTime) { TT.claimTile(s, i); TT.sfx("claim"); endJob(e); }
+      if (e.t >= B.claimTime * (enemy ? 3 : 1)) { TT.claimTile(s, i); TT.sfx("claim"); endJob(e); }
     } else {
       // Gold abliefern
       const put = TT.addGold(s, e.carry);
@@ -263,17 +293,17 @@
       if (s._foes > 0) {
         let near = 99;
         // Ruhende Wachen sind keine Gefahr – geflohen wird erst, wenn eine Wache wirklich angreift
-        for (const o of s.ents) if (o.foe && !o.dead && !(o.guard && o.st !== "fight")) near = Math.min(near, Math.hypot(o.x - e.x, o.y - e.y));
+        for (const o of s.ents) if (TT.hostile(s, o) && !o.worker && !o.dead && !o.held && !(o.guard && o.st !== "fight")) near = Math.min(near, Math.hypot(o.x - e.x, o.y - e.y));
         if (near < 3.5 && (e.st !== "flee" || !e.path.length)) {
           // Ein paar erreichbare Felder ausprobieren und das nehmen, das am weitesten von allen Feinden weg ist
-          const me = TT.tileOf(s, e), fl = TT.flood(s, me, false);
+          const me = TT.tileOf(s, e), fl = TT.flood(s, me, false, true);
           let best = -1, bs = -1;
           for (let k = 0; k < 14; k++) {
             const g = me + Math.round((Math.random() - 0.5) * 16) + Math.round((Math.random() - 0.5) * 16) * s.W;
             if (g <= 0 || g >= s.tiles.length || fl.dist[g] < 0) continue;
             const gx = (g % s.W) + 0.5, gy = ((g / s.W) | 0) + 0.5;
             let dn = 99;
-            for (const o of s.ents) if (o.foe && !o.dead) dn = Math.min(dn, Math.hypot(o.x - gx, o.y - gy));
+            for (const o of s.ents) if (TT.hostile(s, o) && !o.worker && !o.dead && !o.held) dn = Math.min(dn, Math.hypot(o.x - gx, o.y - gy));
             if (dn > bs) { bs = dn; best = g; }
           }
           e.job = null; e.st = "flee"; e.path = best >= 0 ? TT.pathTo(fl, best) : [];
@@ -296,8 +326,8 @@
      ============================================================ */
   function assignHome(s, e) {
     const used = {};
-    for (const o of s.ents) if (!o.foe && o.home >= 0 && !o.dead) used[o.home] = 1;
-    for (let i = 0; i < s.room.length; i++) if (s.room[i] === ID.lair && !used[i]) { e.home = i; return; }
+    for (const o of s.ents) if (!o.foe && o.pl === e.pl && o.home >= 0 && !o.dead) used[o.home] = 1;
+    for (let i = 0; i < s.room.length; i++) if (s.room[i] === ID.lair && !used[i] && TT.mine(s, i)) { e.home = i; return; }
   }
 
   function go(s, e, fl, goal, act) {
@@ -307,7 +337,7 @@
   function pickRoomTile(s, fl, room) {
     let pick = -1, n = 0;
     for (let i = 0; i < s.room.length; i++) {
-      if (s.room[i] === room && fl.dist[i] >= 0) { n++; if (Math.random() * n < 1) pick = i; }
+      if (s.room[i] === room && fl.dist[i] >= 0 && TT.mine(s, i)) { n++; if (Math.random() * n < 1) pick = i; }
     }
     return pick;
   }
@@ -322,13 +352,26 @@
       const resting = e.act === "sleep" && (e.st === "walk" || e.st === "act") && e.hp < TT.maxHp(s, e) * 0.6;
       let best = null, bd = (resting ? 2 : s._alarm ? 999 : 12) + 1;
       for (const o of s.ents) {
-        if (!o.foe || o.dead) continue;
+        if (!TT.hostile(s, o) || o.dead || o.held) continue;
         const d = fl.dist[TT.tileOf(s, o)];
         if (d >= 0 && d < bd) { bd = d; best = o; }
       }
       if (best) { e.st = "fight"; e.target = best.id; e.path = []; e.rep = 0; return true; }
     }
     if (e.st === "leave") return false;
+
+    // Gemeinsame Karte: Wer nahe am feindlichen Herzkern steht, greift ihn an (und bleibt dran)
+    if (s.pl && (e.st === "idle" || e.st === "siege" || (e.st === "walk" && e.act === "wander"))) {
+      const c = s.pl[s.me === 0 ? 1 : 0].coreIdx, W = s.W;
+      fl = fl || TT.flood(s, me, false);
+      let goal = -1, gd = 1e9;
+      for (const a of [c + 1, c - 1, c + W, c - W]) if (fl.dist[a] >= 0 && fl.dist[a] < gd) { gd = fl.dist[a]; goal = a; }
+      if (goal >= 0 && gd <= (e.st === "siege" ? 70 : 30)) {
+        e.st = "siege"; e.path = TT.pathTo(fl, goal); e.act = "";
+        return false;
+      }
+      if (e.st === "siege") e.st = "idle";
+    }
 
     // Kriegstrommel
     if (s.rally) {
@@ -350,7 +393,7 @@
     if (e.hunger > 60) {
       let best = -1, bd = 1e9;
       for (let i = 0; i < s.room.length; i++) {
-        if (s.room[i] === ID.garden && s.food[i] > 0 && fl.dist[i] >= 0 && fl.dist[i] < bd) { bd = fl.dist[i]; best = i; }
+        if (s.room[i] === ID.garden && s.food[i] > 0 && fl.dist[i] >= 0 && fl.dist[i] < bd && TT.mine(s, i)) { bd = fl.dist[i]; best = i; }
       }
       if (best >= 0) { go(s, e, fl, best, "eat"); return false; }
     }
@@ -373,7 +416,7 @@
     const base = e.home >= 0 && Math.random() < 0.5 ? e.home : s.coreIdx;
     for (let tries = 0; tries < 6; tries++) {
       const g = base + Math.round((Math.random() - 0.5) * 10) + Math.round((Math.random() - 0.5) * 10) * s.W;
-      if (g > 0 && g < s.tiles.length && fl.dist[g] > 0 && s.tiles[g] === T.CLAIMED) { go(s, e, fl, g, "wander"); break; }
+      if (g > 0 && g < s.tiles.length && fl.dist[g] > 0 && TT.mine(s, g)) { go(s, e, fl, g, "wander"); break; }
     }
     return false;
   }
@@ -446,7 +489,25 @@
       case "act": doAct(s, e, dt); break;
       case "rally": followPath(s, e, dt, def); break;
       case "leave": if (followPath(s, e, dt, def)) { e.dead = true; e.gone = true; } break;
+      case "siege": siegeStep(s, e, dt, def); break;
     }
+  }
+
+  // Gemeinsame Karte: zum feindlichen Herzkern laufen und auf ihn einschlagen
+  function siegeStep(s, e, dt, def) {
+    if (!s.pl) { e.st = "idle"; return; }
+    if (e.path.length) { followPath(s, e, dt, def); return; }
+    const other = s.me === 0 ? 1 : 0, c = s.pl[other].coreIdx, cx = (c % s.W) + 0.5, cy = ((c / s.W) | 0) + 0.5;
+    if (Math.hypot(cx - e.x, cy - e.y) > 1.6) { e.st = "idle"; e.think = 0; return; }
+    e.dir = cx >= e.x ? 1 : -1;
+    if (e.cd > 0) return;
+    e.cd = def.cd;
+    const dmg = def.dmg * (1 + 0.12 * (e.lvl - 1));
+    if (def.ranged) s.fx.push({ k: "shot", x: e.x, y: e.y - 0.2, x2: cx, y2: cy - 0.3, color: def.shot || "#fff", t: 0.16, d: 0.16 });
+    s.fx.push({ k: "hit", x: cx, y: cy - 0.2, t: 0.18, d: 0.18 });
+    TT.sfx(def.ranged ? "shot" : "hit");
+    TT.inCtx(s, other, function () { TT.hitCore(s, dmg); });
+    gainXp(s, e, 1);
   }
 
   /* ============================================================
@@ -578,6 +639,7 @@
     switch (e.st) {
       case "fight": return "kämpft";
       case "rally": return "folgt der Kriegstrommel";
+      case "siege": return "greift den feindlichen Herzkern an";
       case "leave": return "verlässt den Dungeon";
       case "walk": case "act":
         return { sleep: "schläft sich gesund", eat: "frisst Pilze", train: "trainiert", research: "forscht",

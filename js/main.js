@@ -26,13 +26,31 @@
   ui.init();
 
   let last = performance.now();
+  // Mehrspieler: Das Spiel läuft weiter, auch wenn ein Menü offen ist (es gibt keine Pause).
+  // Der Gast auf der gemeinsamen Karte rechnet nicht selbst, er bekommt alles vom Gastgeber.
+  function stepMP(real) {
+    if (TT.MP.isGuestView()) TT.guestTick(TT.state, real);
+    else {
+      let rem = real;
+      while (rem > 1e-6) { const dt = Math.min(0.05, rem); TT.update(TT.state, dt); rem -= dt; }
+    }
+    TT.MP.tick(real);
+  }
+  // Verdeckter oder verkleinerter Tab: der Browser zeichnet nicht mehr, die Partie muss trotzdem weiterlaufen
+  let stepLast = performance.now(), frameLast = performance.now();
+  setInterval(function () {
+    const now = performance.now();
+    if (now - frameLast > 300 && ui.started && TT.MP.on) { stepMP(Math.min(1, (now - stepLast) / 1000)); stepLast = now; }
+  }, 250);
+
   function frame(now) {
     requestAnimationFrame(frame);
     const real = Math.min(0.1, Math.max(0, (now - last) / 1000));
-    last = now;
+    last = now; stepLast = frameLast = performance.now();
     ui.frame(real);
     if (TT.ambientTick) TT.ambientTick(real);
-    if (ui.started && !ui.paused && !ui.overlayOpen) {
+    if (ui.started && TT.MP.on) stepMP(real);
+    else if (ui.started && !ui.paused && !ui.overlayOpen) {
       // Zeit in kleinen Schritten vorspulen, damit auch bei 3× nichts durch Wände rutscht
       let rem = real * ui.speed;
       while (rem > 1e-6) {

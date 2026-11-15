@@ -30,6 +30,16 @@
     TT.sfx("deny");
   }
 
+  // Spieleraktion ausführen. Als Gast auf der gemeinsamen Karte geht sie an den Gastgeber;
+  // bis dessen Antwort kommt, tun wir so, als hätte es geklappt (eine Absage kommt als Meldung zurück).
+  const OPTIMISTIC = { actMark: 1, actBuild: { built: 1, why: "" }, actSell: { n: 0, gold: 0 }, actTrap: { ok: true }, actSpell: { ok: true }, actGrab: true, actDrop: { ok: true } };
+  function act(name) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    if (TT.MP.isGuestView()) { TT.MP.act(name, args); return OPTIMISTIC[name]; }
+    return TT[name].apply(null, [TT.state].concat(args));
+  }
+  ui.mpDeny = function (why) { deny(why); };
+
   function setTool(tool) {
     ui.tool = tool; ui.drag = null;
     refreshTools();
@@ -62,7 +72,7 @@
   /* ---------- Werkzeugleiste ---------- */
   function buildTools() {
     const box = $("tools");
-    const head = (t) => { const h = document.createElement("h3"); h.textContent = t; box.appendChild(h); };
+    const head = (t) => { const h = document.createElement("h3"); h.textContent = t; box.appendChild(h); return h; };
     const add = (o) => {
       const b = document.createElement("button");
       b.className = "tool" + (o.cls ? " " + o.cls : "");
@@ -75,7 +85,7 @@
       if (o.icon) b.dataset.k = o.icon;
       b.addEventListener("click", () => {
         TT.audioOn = true;
-        if (o.locked && o.locked()) { deny(o.item ? TT.lockReason(TT.state, o.item) : "Noch nicht verfügbar."); return; }
+        if (o.locked && o.locked()) { deny(o.lockText ? o.lockText() : o.item ? TT.lockReason(TT.state, o.item) : "Noch nicht verfügbar."); return; }
         o.pick();
         b.blur();
       });
@@ -122,9 +132,19 @@
         active: (t) => t.kind === "spell" && t.key === sp.key,
         pick: () => {
           if (!sp.instant) { setTool({ kind: "spell", key: sp.key, def: sp }); return; }
-          const r = TT.actSpell(TT.state, sp.key, TT.state.coreIdx);
+          const r = act("actSpell", sp.key, TT.state.coreIdx);
           if (!r.ok) deny(r.why);
         } });
+    });
+
+    // Duell der Dungeons: Angriffstrupps zum Rivalen schicken
+    head("Angriff").classList.add("duel-only");
+    TT.DUEL_ATTACKS.forEach((A) => {
+      add({ name: A.name, color: "#ff9a5c", icon: A.icon, desc: A.desc + " Zwischen zwei Angriffen vergehen " + TT.DUEL_COOLDOWN + " Sekunden.", unit: "Gold", cls: "duel-only",
+        cost: () => A.cost, locked: () => !TT.state.duel || TT.state.duel.cd > 0, poor: () => TT.state.gold < A.cost,
+        lockText: () => TT.state.duel ? "Deine Boten sind noch unterwegs – nächster Angriff in " + Math.ceil(TT.state.duel.cd) + " s." : "",
+        active: () => false,
+        pick: () => { const r = TT.MP.attack(A.key); if (!r.ok) deny(r.why); } });
     });
   }
 
@@ -134,7 +154,7 @@
     const locked = o.locked && o.locked();
     if (o.cost && o.unit && !locked) h += ' &nbsp;<span class="c">' + o.cost() + " " + o.unit + "</span>";
     h += "<br>" + o.desc;
-    if (locked) h += '<br><span class="l">' + (o.item ? TT.lockReason(TT.state, o.item) : "Noch nicht verfügbar.") + "</span>";
+    if (locked) h += '<br><span class="l">' + (o.lockText ? o.lockText() : o.item ? TT.lockReason(TT.state, o.item) : "Noch nicht verfügbar.") + "</span>";
     tip.innerHTML = h;
     tip.style.display = "block";
     tip.style.top = Math.max(50, Math.min(window.innerHeight - tip.offsetHeight - 8, b.getBoundingClientRect().top)) + "px";
@@ -173,7 +193,10 @@
     setText("v-research", item ? item.name : "Alles erforscht");
     $("v-researchbar").style.width = (item ? Math.min(100, R.pts / item.cost * 100) : 100) + "%";
 
-    setText("v-wave", c.foes ? c.foes + " Eindringlinge im Dungeon!" : s.waveT > 1e6 ? (s.bossPhase ? "Der Boss naht" : "Kein Überfall in Sicht") : "Überfall " + (s.waveN + 1) + " in " + TT.fmtTime(s.waveT));
+    if (s.pl) {
+      const near = s.ents.filter((e) => TT.hostile(s, e) && !e.worker && !e.dead && !e.held && TT.mine(s, TT.tileOf(s, e))).length;
+      setText("v-wave", near ? near + " Feinde auf deinem Boden!" : "Rivale: Herzkern " + Math.ceil(s.pl[1 - s.me].coreHp / B.coreHp * 100) + " %");
+    } else setText("v-wave", c.foes ? c.foes + " Eindringlinge im Dungeon!" : s.waveT > 1e6 ? (s.bossPhase ? "Der Boss naht" : "Kein Überfall in Sicht") : "Überfall " + (s.waveN + 1) + " in " + TT.fmtTime(s.waveT));
     $("st-wave").classList.toggle("alert", c.foes > 0 || s.waveT < 25);
     $("b-call").style.display = s.waveT > 5 && s.waveT < 1e6 && !c.foes ? "" : "none";
     setText("b-pause", ui.paused ? "Weiter" : "Pause");
@@ -208,6 +231,7 @@
   // Zielanzeige oben rechts
   function goalsHtml(s) {
     if (!ui.started) return "";
+    if (s.pl || s.duel) return mpGoals(s);
     const L = TT.levelOf(s);
     if (!L) {
       return "<b>Freies Spiel</b>" + (s.won ? '<div class="g done">◆ Lichtvogt bezwungen – endlos weiter</div>'
@@ -220,6 +244,30 @@
     else if (s.bossPhase === 1) h += '<div class="g warn">◇ ' + L.boss.name + " naht … " + TT.fmtTime(s.bossT) + "</div>";
     else if (s.bossPhase === 2) h += '<div class="g warn">◇ Bezwinge ' + L.boss.name + "</div>";
     else h += '<div class="g dim">◇ Danach: ' + L.boss.name + " bezwingen</div>";
+    return h;
+  }
+
+  // Zielanzeige im Mehrspieler: eigener und gegnerischer Herzkern, Lage des Rivalen
+  function mpGoals(s) {
+    const pct = (hp) => Math.max(0, Math.ceil(hp / B.coreHp * 100));
+    const bar = (hp, me) => '<div class="hpbar' + (me ? " me" : "") + '"><i style="width:' + pct(hp) + '%"></i></div>';
+    let h;
+    if (s.pl) {
+      const o = s.pl[1 - s.me];
+      h = "<b>Gemeinsame Karte</b><div class=\"g\">◇ Zerbrich den Herzkern deines Rivalen</div>" +
+        '<div class="g dim">Dein Herzkern: ' + pct(s.coreHp) + " %</div>" + bar(s.coreHp, true) +
+        '<div class="opp"><div class="g">Rivale im ' + TT.compass(s, o.coreIdx) + ": Herzkern " + pct(o.coreHp) + " %</div>" + bar(o.coreHp, false) +
+        '<div class="g dim">Besiegt: ' + s.stats.kills + " · Verloren: " + s.stats.lost + "</div></div>";
+    } else {
+      const D = s.duel, o = D.opp;
+      h = "<b>Duell der Dungeons</b><div class=\"g\">◇ Halte länger durch als dein Rivale</div>" +
+        '<div class="g dim">Dein Herzkern: ' + pct(s.coreHp) + " %</div>" + bar(s.coreHp, true) +
+        '<div class="opp">' + (o ? '<div class="g">Rivale: Herzkern ' + pct(o.hp) + " %</div>" + bar(o.hp, false) +
+          '<div class="g dim">' + o.horde + " Kreaturen · " + o.workers + " Wühler · " + o.gold + " Gold · Überfall " + (o.wave + 1) + "</div>"
+          : '<div class="g dim">Warte auf Nachricht vom Rivalen …</div>') +
+        (D.incoming.length ? '<div class="g warn">◇ Angriff des Rivalen naht: ' + Math.ceil(D.incoming[0].t) + " s</div>" : "") +
+        '<div class="g' + (D.cd > 0 ? " dim" : " done") + '">' + (D.cd > 0 ? "Nächster eigener Angriff in " + Math.ceil(D.cd) + " s" : "◆ Angriff bereit (links: Angriff)") + "</div></div>";
+    }
     return h;
   }
 
@@ -249,6 +297,12 @@
     if (!rc("archive") && TT.unlocked(s, TT.ROOMS[TT.ROOM_ID.archive])) return "Ein Archiv (5) lockt Flüsterer an. Sie erforschen Zauber, Schmiede und Kerker.";
     if (s.research.done.forge && !rc("forge") && TT.unlocked(s, TT.ROOMS[TT.ROOM_ID.forge])) return "Die Schmiede (6) ist erforscht. Ab 4 Feldern kommen Eisenwänste und fertigen Bauteile für Türen und Fallen.";
     if (s.research.done.prison && !rc("prison") && TT.unlocked(s, TT.ROOMS[TT.ROOM_ID.prison])) return "Der Kerker (7) ist erforscht: Besiegte Eindringlinge laufen dort mit der Zeit zu dir über.";
+    if (s.pl) {
+      const o = s.pl[1 - s.me];
+      if (TT.countOwn(s).fighters < 5) return "Dein Rivale baut ebenfalls auf. Sein Herzkern liegt im " + TT.compass(s, o.coreIdx) + " hinter dem Gestein – grab dir einen Gang in seine Richtung.";
+      return "Wirf Kämpfer mit dem Griff (H) an deine Front: Wer bis zu 30 Felder vor dem feindlichen Herzkern steht, greift ihn an. Deine Wühler übernehmen feindlichen Boden, der an deinen grenzt.";
+    }
+    if (s.duel && !s.duel.sent && s.gold >= TT.DUEL_ATTACKS[0].cost) return "Unten links unter „Angriff“ schickst du deinem Rivalen für Gold einen Trupp der Oberwelt auf den Hals.";
     if (s.waveN === 0 && s.waveT < 120) return "Die Oberwelt hat dich bemerkt. Halte Kämpfer in der Nähe des Herzkerns – der Zähler oben läuft.";
     const L = TT.levelOf(s);
     if (L && !s.won) {
@@ -265,7 +319,7 @@
     if (ui.mode3d) return TT.V3.pickEnt(TT.state, ui.view, ui, p.mx, p.my, ownOnly);
     let best = null, bd = 0.75;
     for (const e of TT.state.ents) {
-      if (e.held || e.dead || (ownOnly && e.foe)) continue;
+      if (e.held || e.dead || (ownOnly && !TT.ownEnt(TT.state, e))) continue;
       const d = Math.hypot(e.x - p.wx, e.y - p.wy);
       if (d < bd) { bd = d; best = e; }
     }
@@ -274,8 +328,10 @@
 
   function creatureInfo(s, e) {
     const def = TT.CREATURES[e.type];
-    let h = "<b>" + (e.name || def.name) + "</b> · Stufe " + e.lvl + (e.conv ? " · Überläufer" : e.boss ? " · Endboss" : e.guard ? " · Wache" : e.foe ? " · Eindringling" : "");
+    const rival = !e.foe && s.pl && e.pl !== s.me;
+    let h = "<b>" + (e.name || def.name) + "</b> · Stufe " + e.lvl + (rival ? " · gehört deinem Rivalen" : e.conv ? " · Überläufer" : e.boss ? " · Endboss" : e.guard ? " · Wache" : e.foe ? " · Eindringling" : "");
     h += "<br>Leben " + Math.max(0, Math.ceil(e.hp)) + " / " + TT.maxHp(s, e);
+    if (rival) return h;
     if (!e.foe && !e.worker) {
       h += "<br>Laune " + Math.round(Math.max(0, e.mood)) + " % · Hunger " + Math.round(e.hunger) + " %";
       h += "<br>Sold " + TT.wageOf(e) + " Gold" + (e.home < 0 ? ' · <span style="color:#ffb347">kein Schlafplatz</span>' : "");
@@ -296,6 +352,12 @@
     if (!s.seen[i]) return "<b>Unerforscht</b><br><i>Niemand weiß, was hier liegt.</i>";
     if (i === s.coreIdx) return "<b>Herzkern</b><br>Leben " + Math.ceil(s.coreHp) + " / " + B.coreHp + "<br><i>Zerbricht er, ist alles verloren.</i>";
     if (i === s.rift.idx) return "<b>Riss</b><br><i>" + (s.rift.on ? "Durch ihn kommen neue Kreaturen." : "Noch herrenlos – lass ihn beanspruchen.") + "</i>";
+    if (s.pl) {
+      const o = s.pl[1 - s.me];
+      if (i === o.coreIdx) return "<b>Herzkern deines Rivalen</b><br>Leben " + Math.ceil(o.coreHp) + " / " + B.coreHp + "<br><i>Zerbrich ihn, und die Tiefe gehört dir.</i>";
+      if (i === o.rift.idx) return "<b>Riss deines Rivalen</b><br><i>Durch ihn kommen seine Kreaturen.</i>";
+      if (TT.theirs(s, i)) return "<b>Boden deines Rivalen</b>" + (s.room[i] ? " · " + TT.ROOMS[s.room[i]].name : "") + "<br><i>Deine Wühler können ihn übernehmen, wenn er an deinen grenzt.</i>";
+    }
     if (s.shafts.indexOf(i) >= 0) return "<b>Schacht zur Oberwelt</b><br><i>Hier steigen die Überfälle herab.</i>";
     if (s.obj[i]) {
       const tr = TT.trapAt(s, i), def = TT.TRAP_BY_OBJ[s.obj[i]];
@@ -344,15 +406,15 @@
     const inb = d.x1 >= 0 && d.y1 >= 0 && d.x1 < W && d.y1 < s.H, i = d.y1 * W + d.x1;
     switch (tool.kind === "select" && d.dig ? "dig" : tool.kind) {
       case "select": { const e = pick(p, false); ui.sel = e ? e.id : 0; break; }
-      case "dig": if (TT.actMark(s, x0, y0, x1, y1, d.on)) TT.sfx("mark"); break;
-      case "room": { const r = TT.actBuild(s, tool.id, x0, y0, x1, y1); if (!r.built) deny(r.why); break; }
-      case "sell": { const r = TT.actSell(s, x0, y0, x1, y1); if (r.gold) TT.msg(s, "Abgerissen: " + r.gold + " Gold zurück.", "info"); break; }
-      case "trap": if (inb) { const r = TT.actTrap(s, tool.key, i); if (!r.ok) deny(r.why); } break;
-      case "spell": if (inb) { const r = TT.actSpell(s, tool.key, i); if (!r.ok) deny(r.why); } break;
+      case "dig": if (act("actMark", x0, y0, x1, y1, d.on)) TT.sfx("mark"); break;
+      case "room": { const r = act("actBuild", tool.id, x0, y0, x1, y1); if (!r.built) deny(r.why); break; }
+      case "sell": { const r = act("actSell", x0, y0, x1, y1); if (r.gold) TT.msg(s, "Abgerissen: " + r.gold + " Gold zurück.", "info"); break; }
+      case "trap": if (inb) { const r = act("actTrap", tool.key, i); if (!r.ok) deny(r.why); } break;
+      case "spell": if (inb) { const r = act("actSpell", tool.key, i); if (!r.ok) deny(r.why); } break;
       case "hand": {
         const e = pick(p, true);
-        if (e) { if (!TT.actGrab(s, e.id)) deny("Mehr passt nicht in deinen Griff."); }
-        else if (inb) { const r = TT.actDrop(s, i); if (!r.ok) deny(r.why); }
+        if (e) { if (!act("actGrab", e.id)) deny("Mehr passt nicht in deinen Griff."); }
+        else if (inb) { const r = act("actDrop", i); if (!r.ok) deny(r.why); }
         break;
       }
     }
@@ -418,7 +480,7 @@
           if (ui.tool.kind === "hand" && TT.heldCount(s) > 0) {
             // Rechtsklick mit vollem Griff: eine Kreatur absetzen
             const p = toWorld(ev), tx = Math.floor(p.wx), ty = Math.floor(p.wy);
-            const r = tx >= 0 && ty >= 0 && tx < s.W && ty < s.H ? TT.actDrop(s, ty * s.W + tx) : { ok: false, why: "" };
+            const r = tx >= 0 && ty >= 0 && tx < s.W && ty < s.H ? act("actDrop", ty * s.W + tx) : { ok: false, why: "" };
             if (!r.ok) deny(r.why);
             refreshTools();
           } else { ui.sel = 0; setTool({ kind: "select" }); }
@@ -463,6 +525,7 @@
       if (ui.overlayOpen) {
         if ((ev.code === "Escape" || ev.code === "KeyM") && ui.started && ui.overlayKind === "menu") closeOverlay();
         else if (ev.code === "Escape" && ui.overlayKind === "help") closeOverlay();
+        else if (ev.code === "Escape" && ui.overlayKind === "mp") closeOverlay();
         return;
       }
       if (ui.title && document.body.classList.contains("camp-mode")) {
@@ -477,13 +540,13 @@
         return;
       }
       switch (ev.code) {
-        case "Space": ui.paused = !ui.paused; ev.preventDefault(); break;
+        case "Space": if (!TT.MP.on) ui.paused = !ui.paused; ev.preventDefault(); break;
         case "Escape": ui.sel = 0; setTool({ kind: "select" }); break;
         case "KeyV": ui.setMode(!ui.mode3d); savePref(); break;
         case "KeyG": setTool({ kind: "dig" }); break;
         case "KeyH": setTool({ kind: "hand" }); break;
         case "KeyX": setTool({ kind: "sell" }); break;
-        case "KeyF": cycleSpeed(); break;
+        case "KeyF": if (!TT.MP.on) cycleSpeed(); break;
         case "KeyM": openOverlay("menu"); break;
         default:
           if (/^Digit[1-9]$/.test(ev.code)) {
@@ -652,6 +715,7 @@
 
   function showTitle() {
     closeOverlay();
+    if (TT.MP.on || document.body.classList.contains("mp")) endMP();
     ui.title = true; ui.started = false; ui.paused = false; ui.sel = 0; ui.hx = -1;
     TT.state = demo || (demo = makeDemo());
     TT.quiet = true;                                       // der Beispiel-Dungeon macht keine Geräusche
@@ -660,6 +724,77 @@
     setTool({ kind: "select" });
     refreshTitle();
   }
+
+  /* ---------- Mehrspieler ---------- */
+  function startMP(mode) {
+    closeOverlay();
+    document.body.classList.add("mp", "mp-" + mode);
+    ui.speed = 1; $("b-speed").textContent = "1×";
+    begin(true);
+    TT.msg(TT.state, mode === "duel" ? "Das Duell beginnt. Dein Rivale baut auf derselben Karte – überlebe ihn." : "Die Partie beginnt. Du spielst " + (TT.MP.role === "host" ? "den Herzkern im Westen." : "den Herzkern im Osten."), "good");
+  }
+  function endMP() {
+    TT.MP.leave(true);
+    document.body.classList.remove("mp", "mp-duel", "mp-versus");
+  }
+  function mpStatus(text, err) {
+    const el = $("mp-status");
+    if (el) { el.textContent = text || ""; el.classList.toggle("err", !!err); }
+  }
+
+  function openMp() {
+    const card = $("card");
+    card.innerHTML = "<h2>Mehrspieler</h2><p>Zu zweit über das Internet. Einer eröffnet ein Spiel und bekommt einen Raumcode, der andere gibt den Code hier ein. " +
+      "Ihr braucht keine Anmeldung; die Daten gehen direkt von Browser zu Browser.</p>" +
+      "<h3>Spiel eröffnen</h3><div class=\"mp-modes\">" +
+      '<button class="mp-mode" data-a="host-duel"><b>Duell der Dungeons</b><small>Jeder baut seinen eigenen Dungeon auf derselben Startkarte. ' +
+      "Mit Gold schickt ihr euch gegenseitig Trupps der Oberwelt auf den Hals. Wessen Herzkern zuerst fällt, verliert.</small></button>" +
+      '<button class="mp-mode" data-a="host-versus"><b>Gemeinsame Karte</b><small>Beide Herzkerne auf einer Karte. Grabt euch zueinander durch, ' +
+      "übernehmt den Boden des anderen, werft eure Horde an die Front und zerbrecht den feindlichen Herzkern.</small></button></div>" +
+      "<h3>Spiel beitreten</h3><div class=\"mp-join\"><input id=\"mp-code\" maxlength=\"5\" placeholder=\"Code\" autocomplete=\"off\" spellcheck=\"false\">" +
+      '<button class="main" data-a="join">Beitreten</button></div><p class="mp-status" id="mp-status"></p>' +
+      '<div class="row"><button data-a="back">Zurück</button></div>';
+    bindMp(card);
+    showOverlay("mp");
+    const inp = $("mp-code");
+    inp.addEventListener("keydown", (ev) => { if (ev.code === "Enter" || ev.code === "NumpadEnter") { ev.preventDefault(); TT.MP.join(inp.value); } });
+    inp.addEventListener("input", () => { inp.value = TT.Net.cleanCode(inp.value); });
+    if (!TT.Net.available()) mpStatus("Dein Browser unterstützt keine direkten Verbindungen (WebRTC) – Mehrspieler geht hier leider nicht.", true);
+  }
+
+  function openMpWait(code, mode) {
+    const card = $("card");
+    card.innerHTML = "<h2>Warte auf Mitspieler</h2><p>Modus: <b>" + TT.MP.modeName(mode) + "</b></p>" +
+      '<div class="mp-code">' + code + "</div><p>Schick deinem Mitspieler diesen Code. Er wählt im Hauptmenü <b>Mehrspieler</b>, tippt den Code ein und klickt auf <b>Beitreten</b>. " +
+      "Lass dieses Fenster offen – die Partie startet von selbst.</p>" +
+      '<p class="mp-wait">Warte auf Verbindung …</p><p class="mp-status" id="mp-status"></p>' +
+      '<div class="row"><button class="main" data-a="copy">Code kopieren</button><button data-a="cancel">Abbrechen</button></div>';
+    bindMp(card);
+    showOverlay("mpwait");
+  }
+
+  function bindMp(card) {
+    card.querySelectorAll("button[data-a]").forEach((b) => b.addEventListener("click", () => {
+      TT.audioOn = true;
+      const a = b.dataset.a;
+      if (a === "host-duel") TT.MP.host("duel");
+      else if (a === "host-versus") TT.MP.host("versus");
+      else if (a === "join") TT.MP.join($("mp-code").value);
+      else if (a === "copy") {
+        const done = () => { b.textContent = "Kopiert!"; setTimeout(() => { b.textContent = "Code kopieren"; }, 1500); };
+        try { navigator.clipboard.writeText(TT.MP.code).then(done, () => {}); } catch (err) { /* egal */ }
+      } else if (a === "cancel") { TT.MP.leave(true); openMp(); }
+      else if (a === "back") { TT.MP.leave(true); closeOverlay(); }
+    }));
+  }
+
+  TT.MP.cb = {
+    status: mpStatus,
+    waiting: openMpWait,
+    start: startMP,
+    deny: (why) => deny(why),
+    dropped: () => { if (ui.started) openOverlay("mpdrop"); else mpStatus("Die Verbindung ist abgerissen.", true); },
+  };
 
   function hideTitle() {
     ui.title = false; TT.quiet = false;
@@ -680,6 +815,7 @@
     });
     $("c-back").addEventListener("click", hideCamp);
     $("t-help").addEventListener("click", () => { TT.audioOn = true; openOverlay("help"); });
+    $("t-mp").addEventListener("click", () => { TT.audioOn = true; openMp(); });
     $("t-view").addEventListener("click", (ev) => { ui.setMode(!ui.mode3d); savePref(); ev.currentTarget.blur(); });
     $("t-sound").addEventListener("click", (ev) => { $("b-sound").click(); ev.currentTarget.blur(); });
   }
@@ -804,10 +940,28 @@
         "<p><b>Kampagne:</b> Acht Gebiete, jedes größer und härter. In jedem halten Wachen des Ordens Siegelsteine. Grab dich zu ihnen durch, " +
         "wirf deine Kämpfer mit dem Griff zu den Wachen und lass die Wühler die Steine einnehmen. Sind alle gebrochen, steigt der Endboss des Gebiets herab.</p>" +
         "<p><b>Freies Spiel:</b> Eine Zufallskarte ohne Ziel außer Überleben – der Lichtvogt kommt mit dem zehnten Überfall.</p>" +
+        "<p><b>Mehrspieler:</b> Zu zweit per Raumcode. Im <i>Duell der Dungeons</i> baut jeder seinen eigenen Dungeon und schickt dem anderen für Gold " +
+        "Angriffstrupps. Auf der <i>gemeinsamen Karte</i> grabt ihr euch zueinander durch, übernehmt den Boden des anderen und zerbrecht seinen Herzkern.</p>" +
         HELP + '<div class="row"><button class="main" data-a="back">Zurück</button></div>' + CREDITS;
+    } else if (kind === "menu" && TT.MP.on) {
+      h = "<h2>Menü</h2><p>Die Partie läuft weiter, solange dieses Fenster offen ist.</p>" + HELP +
+        '<div class="row"><button class="main" data-a="resume">Zurück ins Spiel</button><button data-a="leave">Partie aufgeben und verlassen</button></div>' + CREDITS;
     } else if (kind === "menu") {
       h = "<h2>Pause</h2>" + HELP + '<div class="row"><button class="main" data-a="resume">Weiter</button>' +
         '<button data-a="save">Speichern</button><button data-a="title">Hauptmenü</button></div>' + CREDITS;
+    } else if (kind === "mpwin" || kind === "mplose") {
+      const win = kind === "mpwin";
+      h = (win ? "<h2>Sieg!</h2><p>Der Herzkern deines Rivalen zerspringt. Seine Horde zerstreut sich in alle Gänge – die Tiefe gehört dir.</p>"
+        : '<h2 class="bad">Niederlage</h2><p>Dein Herzkern ist zerbrochen. Dein Rivale herrscht nun über die Tiefe – fürs Erste.</p>') +
+        '<p class="stats">Spielzeit: ' + TT.fmtTime(s.time) + " · Besiegte Feinde: " + s.stats.kills + " · Gefallene Kreaturen: " + s.stats.lost +
+        " · Gefördertes Gold: " + s.stats.mined + "</p>" +
+        '<div class="row"><button class="main" data-a="title">Hauptmenü</button>' + (win ? '<button data-a="look">Noch umsehen</button>' : "") + "</div>";
+    } else if (kind === "mpdrop") {
+      const duel = !!s.duel && !s.over;
+      h = "<h2>Verbindung verloren</h2><p>Dein Rivale ist nicht mehr da – er hat das Spiel verlassen, oder die Verbindung ist abgerissen.</p>" +
+        (duel ? "<p>Du kannst deinen Dungeon allein weiterführen; die Überfälle der Oberwelt kommen weiterhin.</p>" : "") +
+        '<div class="row">' + (duel ? '<button class="main" data-a="solo">Allein weiterspielen</button>' : "") +
+        '<button' + (duel ? "" : ' class="main"') + ' data-a="title">Hauptmenü</button></div>';
     } else if (kind === "over" && TT.levelOf(s)) {
       const L = TT.levelOf(s);
       h = '<h2 class="bad">Gebiet verloren</h2><p>Der Herzkern zerspringt. Orm flüstert: „Noch einmal. Der Fels vergisst nicht, aber er vergibt.“</p>' + stats +
@@ -834,6 +988,9 @@
     card.querySelectorAll("button[data-a]").forEach((b) => b.addEventListener("click", () => {
       TT.audioOn = true;
       const a = b.dataset.a;
+      if (a === "leave" || (a === "title" && TT.MP.on)) { endMP(); showTitle(); return; }
+      if (a === "solo") { TT.MP.solo(); document.body.classList.remove("mp", "mp-duel", "mp-versus"); s.duel = null; s.mode = null; closeOverlay(); return; }
+      if (a === "look") { closeOverlay(); return; }
       if (a === "new") { newGame(); closeOverlay(); }
       else if (a === "load") { if (loadGame()) closeOverlay(); }
       else if (a === "save") { saveGame(true); closeOverlay(); }
@@ -850,6 +1007,10 @@
   function closeOverlay() {
     ui.overlayOpen = false;
     $("overlay").classList.remove("open");
+  }
+  function showOverlay(kind) {
+    ui.overlayOpen = true; ui.overlayKind = kind; ui.drag = null; ui.pan = null;
+    $("overlay").classList.add("open");
   }
 
   /* ---------- Start und Bild-für-Bild-Arbeit ---------- */
@@ -906,7 +1067,15 @@
     ui.miniT -= dt;
     if (ui.miniT <= 0) { ui.miniT = 0.2; TT.drawMini(s, v, mctx, performance.now() / 1000, ui.mode3d ? TT.V3.viewPoly(v, ui) : null); }
 
-    if (ui.started && !ui.overlayOpen) {
+    if (ui.started && TT.MP.on) {
+      const won = s.pl ? s.over && s.winner === s.me : !!(s.duel && s.duel.won);
+      const lost = s.pl ? s.over && s.winner !== s.me : s.over;
+      if ((won || lost) && !ui.endShown) {
+        ui.endShown = true;
+        if (won) TT.sfx("win");
+        openOverlay(won ? "mpwin" : "mplose");
+      }
+    } else if (ui.started && !ui.overlayOpen) {
       if (s.over && !ui.endShown) { ui.endShown = true; openOverlay("over"); }
       else if (s.won && !s.wonShown) {
         s.wonShown = true; TT.sfx("win");

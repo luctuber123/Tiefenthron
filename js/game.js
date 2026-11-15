@@ -11,10 +11,10 @@
 
   /* ---------- Wirtschaft ---------- */
   TT.countRooms = function (s) {
-    const rc = new Array(TT.ROOMS.length).fill(0);
+    const rc = new Array(TT.ROOMS.length).fill(0), own = s.own, me1 = s.me + 1;
     let claimed = 0;
     for (let i = 0; i < s.tiles.length; i++) {
-      if (s.tiles[i] === T.CLAIMED) { claimed++; if (s.room[i]) rc[s.room[i]]++; }
+      if (s.tiles[i] === T.CLAIMED && (!own || own[i] === me1)) { claimed++; if (s.room[i]) rc[s.room[i]]++; }
     }
     s._rc = rc; s._claimed = claimed;
     return rc;
@@ -47,7 +47,7 @@
     let workers = 0, fighters = 0, foes = 0, guards = 0;
     for (const e of s.ents) {
       if (e.dead) continue;
-      if (e.foe) { if (e.guard) guards++; else foes++; } else if (e.worker) workers++; else fighters++;
+      if (e.foe) { if (e.guard) guards++; else foes++; } else if (s.pl && e.pl !== s.me) foes++; else if (e.worker) workers++; else fighters++;
     }
     return { workers: workers, fighters: fighters, foes: foes, guards: guards };
   };
@@ -76,6 +76,10 @@
       s.coreHp = 0; s.over = true;
       TT.msg(s, "Der Herzkern ist zerbrochen. Dein Reich zerfällt zu Staub.", "bad");
       TT.sfx("lose");
+      if (s.pl) {                                         // gemeinsame Karte: der andere hat gewonnen
+        s.winner = s.me === 0 ? 1 : 0;
+        TT.inCtx(s, s.winner, function () { TT.msg(s, "Der Herzkern deines Rivalen zerspringt!", "good"); TT.sfx("win"); });
+      }
     }
   };
 
@@ -85,7 +89,7 @@
     if (L) { spawnLevelWave(s, L); return; }
     const n = ++s.waveN, C = TT.CREATURES, W = s.W;
     const shaft = s.shafts[s.shaftPick % s.shafts.length];
-    const boss = n === 10 || (n > 10 && n % 5 === 0);
+    const boss = !s.duel && (n === 10 || (n > 10 && n % 5 === 0));
     let budget = 3 + n * 2.05 + n * n * 0.065;     // Überfälle wachsen erst gemächlich, dann spürbar
     const list = [];
     if (boss) { list.push("vogt"); budget *= 0.7; }
@@ -109,6 +113,7 @@
   }
 
   // Eindringlinge um einen Schacht herum absetzen
+  TT.dropFoes = function (s, shaft, list, lvl, hpx) { return drop(s, shaft, list, lvl, hpx); };
   function drop(s, shaft, list, lvl, hpx) {
     const C = TT.CREATURES, W = s.W, out = [];
     list.forEach(function (k, j) {
@@ -178,7 +183,7 @@
   function gateSpawn(s) {
     const rc = s._rc, C = TT.CREATURES, cnt = {};
     let fighters = 0;
-    for (const e of s.ents) if (!e.foe && !e.worker && !e.dead) { fighters++; cnt[e.type] = (cnt[e.type] || 0) + 1; }
+    for (const e of s.ents) if (TT.ownEnt(s, e) && !e.worker && !e.dead) { fighters++; cnt[e.type] = (cnt[e.type] || 0) + 1; }
     if (fighters >= Math.min(rc[ID.lair], B.maxCreatures)) return;
     // Arten, die noch ganz fehlen, kommen bevorzugt – so lohnt sich jeder neue Raum sofort
     const wt = function (k) { return C[k].weight * (cnt[k] ? 1 : 4); };
@@ -207,14 +212,32 @@
      HAUPT-UPDATE (wird viele Male pro Sekunde aufgerufen)
      ============================================================ */
   TT.update = function (s, dt) {
+    if (s.pl) { TT.updateVersus(s, dt); return; }
     if (s.over) return;
     s.time += dt;
     const rc = TT.countRooms(s);
+    essTick(s, dt);
+    growTick(s, dt);
+    econTick(s, dt, rc);
+    waveTick(s, dt);
+    if (s.duel && TT.duelTick) TT.duelTick(s, dt);
+    // Kriegstrommel läuft aus
+    if (s.rally) { s.rally.t -= dt; if (s.rally.t <= 0) s.rally = null; }
+    alarmTick(s);
+    // Kreaturen
+    for (let k = 0; k < s.ents.length; k++) TT.updateEnt(s, s.ents[k], dt);
+    trapTick(s, dt);
+    prisonTick(s, dt, rc);
+    pickupTick(s);
+    coreHealTick(s, dt);
+    cleanupTick(s, dt);
+  };
 
-    // Essenz fließt aus beanspruchtem Boden
-    s.ess = Math.min(TT.essCap(s), s.ess + dt * (0.8 + s._claimed * 0.015));
+  // Essenz fließt aus beanspruchtem Boden
+  function essTick(s, dt) { s.ess = Math.min(TT.essCap(s), s.ess + dt * (0.8 + s._claimed * 0.015)); }
 
-    // Pilze wachsen
+  // Pilze wachsen
+  function growTick(s, dt) {
     s.growT += dt;
     if (s.growT >= 2) {
       s.growT = 0;
@@ -222,8 +245,10 @@
         if (s.room[i] === ID.garden && s.food[i] < 3 && Math.random() < 0.1) s.food[i]++;
       }
     }
+  }
 
-    // Forschung
+  // Forschung, Zahltag und Riss des Spielers, der gerade dran ist
+  function econTick(s, dt, rc) {
     const R = s.research;
     if (!R.cur) {
       const L = TT.levelOf(s);
@@ -247,7 +272,7 @@
       let paid = 0, unpaid = 0;
       for (const e of s.ents) {
         const w = TT.wageOf(e);
-        if (!w || e.dead) continue;
+        if (!w || e.dead || (s.pl && e.pl !== s.me)) continue;
         if (s.gold >= w) { s.gold -= w; paid += w; e.mood = Math.min(100, e.mood + 4); }
         else { unpaid++; e.mood -= 35; }
       }
@@ -261,7 +286,9 @@
       s.gateT -= dt;
       if (s.gateT <= 0) { s.gateT = B.gateEvery; gateSpawn(s); }
     }
+  }
 
+  function waveTick(s, dt) {
     // Überfälle
     s.waveT -= dt;
     if (s.waveT <= 25 && !s.warned) {
@@ -284,33 +311,32 @@
         if (s.bossT <= 0) { s.bossPhase = 2; spawnBoss(s, LV); }
       }
     }
+  }
 
-    // Kriegstrommel läuft aus
-    if (s.rally) { s.rally.t -= dt; if (s.rally.t <= 0) s.rally = null; }
-
-    // Alarm: Eindringlinge auf deinem Boden oder Kern unter Beschuss
+  // Alarm: Feinde auf deinem Boden oder Kern unter Beschuss
+  function alarmTick(s) {
     let foes = 0, alarm = s.time - s.coreHitT < 6;
     for (const e of s.ents) {
-      if (!e.foe || e.dead) continue;
+      if (!TT.hostile(s, e) || e.dead || e.held) continue;
       foes++;
-      if (s.tiles[TT.tileOf(s, e)] === T.CLAIMED) alarm = true;
+      if (!e.worker && TT.mine(s, TT.tileOf(s, e))) alarm = true;
     }
     if (alarm && !s._alarm) TT.sfx("alarm");
     s._foes = foes; s._alarm = alarm;
+  }
 
-    // Kreaturen
-    for (let k = 0; k < s.ents.length; k++) TT.updateEnt(s, s.ents[k], dt);
-
-    // Fallen
+  // Fallen auf dem Boden des Spielers, der gerade dran ist
+  function trapTick(s, dt) {
     for (let k = s.traps.length - 1; k >= 0; k--) {
       const tr = s.traps[k];
       if (tr.k === OBJ.DOOR) continue;
+      if (s.own && s.own[tr.idx] !== s.me + 1) continue;
       if (tr.cd > 0) { tr.cd -= dt; continue; }
-      if (!foes) continue;
+      if (!s._foes) continue;
       const def = TT.TRAP_BY_OBJ[tr.k], tx = (tr.idx % s.W) + 0.5, ty = ((tr.idx / s.W) | 0) + 0.5;
       let hit = false;
       for (const e of s.ents) {
-        if (!e.foe || e.dead || Math.hypot(e.x - tx, e.y - ty) > def.radius) continue;
+        if (!TT.hostile(s, e) || e.dead || e.held || Math.hypot(e.x - tx, e.y - ty) > def.radius) continue;
         TT.damage(s, e, def.dmg, null); hit = true;
         if (!def.area) break;
       }
@@ -321,7 +347,9 @@
         if (tr.ch <= 0) { s.obj[tr.idx] = 0; s.traps.splice(k, 1); }
       }
     }
+  }
 
+  function prisonTick(s, dt, rc) {
     // Gefangene laufen über
     for (let k = s.prisoners.length - 1; k >= 0; k--) {
       const p = s.prisoners[k];
@@ -341,12 +369,14 @@
         TT.sfx("arrive");
       }
     }
+  }
 
-    // Truhen einsammeln
+  // Truhen einsammeln (nur Kreaturen des Spielers, der gerade dran ist)
+  function pickupTick(s) {
     for (let k = s.pickups.length - 1; k >= 0; k--) {
       const p = s.pickups[k];
       for (const e of s.ents) {
-        if (e.foe || e.dead || e.held || TT.tileOf(s, e) !== p.idx) continue;
+        if (!TT.ownEnt(s, e) || e.dead || e.held || TT.tileOf(s, e) !== p.idx) continue;
         const put = TT.addGold(s, p.gold);
         s.fx.push({ k: "text", x: e.x, y: e.y - 0.5, text: "Truhe! +" + put, color: "#ffd75e", t: 1.6, d: 1.6 });
         TT.msg(s, "Eine vergessene Truhe: +" + put + " Gold.", "good");
@@ -355,16 +385,24 @@
         break;
       }
     }
+  }
 
-    // Kern heilt sich außerhalb von Kämpfen
+  // Kern heilt sich außerhalb von Kämpfen
+  function coreHealTick(s, dt) {
     if (s.time - s.coreHitT > 15 && s.coreHp < B.coreHp) s.coreHp = Math.min(B.coreHp, s.coreHp + dt * 3);
+  }
 
-    // Aufräumen
+  // Aufräumen
+  function cleanupTick(s, dt) {
     let anyDead = false;
     for (const e of s.ents) if (e.dead) { anyDead = true; break; }
     if (anyDead) s.ents = s.ents.filter(function (e) { return !e.dead; });
     for (let k = s.fx.length - 1; k >= 0; k--) { s.fx[k].t -= dt; if (s.fx[k].t <= 0) s.fx.splice(k, 1); }
-  };
+  }
+
+  // Für die gemeinsame Karte (js/versus.js)
+  TT.ticks = { ess: essTick, grow: growTick, econ: econTick, alarm: alarmTick, traps: trapTick, pickups: pickupTick,
+    coreHeal: coreHealTick, cleanup: cleanupTick };
 
   /* ============================================================
      SPIELERAKTIONEN (werden von der Oberfläche aufgerufen)
@@ -386,12 +424,13 @@
 
   TT.isSpecial = function (s, i) {
     if (i === s.coreIdx || i === s.rift.idx || s.shafts.indexOf(i) >= 0) return true;
+    if (s.pl) for (const P of s.pl) if (i === P.coreIdx || i === P.rift.idx) return true;
     for (const p of s.pickups) if (p.idx === i) return true;
     return false;
   };
 
   TT.canBuildAt = function (s, i) {
-    return s.tiles[i] === T.CLAIMED && !s.room[i] && !s.obj[i] && !TT.isSpecial(s, i);
+    return TT.mine(s, i) && !s.room[i] && !s.obj[i] && !TT.isSpecial(s, i);
   };
 
   TT.actBuild = function (s, roomId, x0, y0, x1, y1) {
@@ -416,6 +455,7 @@
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       if (x < 1 || y < 1 || x > s.W - 2 || y > s.H - 2) continue;
       const i = y * s.W + x;
+      if (s.own && s.own[i] !== s.me + 1) continue;
       if (s.room[i]) { gold += Math.floor(TT.ROOMS[s.room[i]].cost / 2); s.room[i] = 0; s.food[i] = 0; n++; }
       if (s.obj[i]) {
         s.parts = Math.min(B.partsCap, s.parts + Math.floor(TT.TRAP_BY_OBJ[s.obj[i]].parts / 2));
@@ -467,7 +507,7 @@
         break;
       case "heal": {
         let n = 0;
-        for (const e of s.ents) if (!e.foe && !e.held && near(e)) { const m = TT.maxHp(s, e); e.hp = Math.min(m, e.hp + m * 0.5); n++; }
+        for (const e of s.ents) if (TT.ownEnt(s, e) && !e.held && near(e)) { const m = TT.maxHp(s, e); e.hp = Math.min(m, e.hp + m * 0.5); n++; }
         if (!n) return { ok: false, why: "Dort ist niemand, den du heilen könntest." };
         s.fx.push({ k: "ring", x: x, y: y, r: sp.radius, color: "#7dffb0", t: 0.7, d: 0.7 });
         break;
@@ -476,7 +516,7 @@
         if (!s.seen[i]) return { ok: false, why: "Du kannst nur treffen, was du siehst." };
         s.fx.push({ k: "bolt", x: x, y: y, t: 0.3, d: 0.3 });
         s.fx.push({ k: "ring", x: x, y: y, r: sp.radius, color: "#fff7c0", t: 0.3, d: 0.3 });
-        for (const e of s.ents) if (e.foe && !e.dead && near(e)) TT.damage(s, e, 70, null);
+        for (const e of s.ents) if (TT.hostile(s, e) && !e.dead && !e.held && near(e)) TT.damage(s, e, 70, null);
         break;
       }
       case "drum":
@@ -486,7 +526,7 @@
         break;
       case "haste": {
         let n = 0;
-        for (const e of s.ents) if (!e.foe && !e.held && near(e)) { e.haste = 15; n++; }
+        for (const e of s.ents) if (TT.ownEnt(s, e) && !e.held && near(e)) { e.haste = 15; n++; }
         if (!n) return { ok: false, why: "Dort ist niemand, den du hetzen könntest." };
         s.fx.push({ k: "ring", x: x, y: y, r: sp.radius, color: "#ffe36e", t: 0.6, d: 0.6 });
         break;
@@ -500,23 +540,23 @@
   // Kreatur aufheben und woanders absetzen
   TT.heldCount = function (s) {
     let n = 0;
-    for (const e of s.ents) if (e.held) n++;
+    for (const e of s.ents) if (e.held && (!s.pl || e.pl === s.me)) n++;
     return n;
   };
   TT.actGrab = function (s, id) {
     const e = TT.byId(s, id);
-    if (!e || e.foe || e.held || e.dead) return false;
+    if (!e || !TT.ownEnt(s, e) || e.held || e.dead) return false;
     if (TT.heldCount(s) >= B.maxHeld) return false;
     e.held = true; e.job = null; e.path = []; e.target = 0; e.st = "idle";
     TT.sfx("grab");
     return true;
   };
   TT.actDrop = function (s, i) {
-    if (s.tiles[i] !== T.CLAIMED || i === s.coreIdx) return { ok: false, why: "Absetzen geht nur auf deinem eigenen Boden." };
+    if (!TT.mine(s, i) || TT.isCore(s, i)) return { ok: false, why: "Absetzen geht nur auf deinem eigenen Boden." };
     if (s.tut) s.tut.dropped = true;                      // fürs Tutorial: hat schon einmal abgesetzt
     for (let k = s.ents.length - 1; k >= 0; k--) {
       const e = s.ents[k];
-      if (!e.held) continue;
+      if (!e.held || (s.pl && e.pl !== s.me)) continue;
       e.held = false; e.x = (i % s.W) + 0.5; e.y = ((i / s.W) | 0) + 0.5;
       e.stun = 0.5; e.think = 0; e.lt = -1; e.st = "idle";
       s.fx.push({ k: "puff", x: e.x, y: e.y, t: 0.3, d: 0.3, color: "#c9c2d6" });

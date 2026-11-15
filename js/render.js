@@ -303,13 +303,14 @@
     if (asleep) g.globalAlpha = 0.72;
     ART[def.art || e.type](g, e, time, rot);
     if (e.conv) rect(g, -4.6, 0.4, 9.2, 1.7, "#b06cff");      // Überläufer tragen dein Band
+    if (s.pl && !e.foe && e.pl !== s.me) rect(g, -4.6, 0.4, 9.2, 1.7, "#ff3a2a");   // Kreaturen des Rivalen
     if (e.hurt > 0) circ(g, 0, 0, 10, "rgba(255,255,255,0.4)");
     g.restore();
 
     const top = -13 * sc - 3, mx = TT.maxHp(s, e);
     if (e.hp < mx) {
       rect(g, -8, top, 16, 2.6, "rgba(0,0,0,0.7)");
-      rect(g, -7.5, top + 0.5, 15 * Math.max(0, e.hp / mx), 1.6, e.foe ? "#ff6a55" : "#7dffb0");
+      rect(g, -7.5, top + 0.5, 15 * Math.max(0, e.hp / mx), 1.6, TT.hostile(s, e) ? "#ff6a55" : "#7dffb0");
     }
     g.textAlign = "center";
     if (e.lvl > 1) {
@@ -479,6 +480,21 @@
         ctx.beginPath(); ctx.arc(0, 0, 12 - k * 3, a, a + 2.4); ctx.stroke();
       }
     }
+    if (s.pl && vis(s.pl[1 - s.me].coreIdx)) {               // Herzkern des Rivalen
+      const o = s.pl[1 - s.me], p = 1 + Math.sin(time * 2.6) * 0.05, hurt = s.time - o.coreHitT < 0.25;
+      at((o.coreIdx % W) + 0.5, ((o.coreIdx / W) | 0) + 0.5);
+      ell(ctx, 0, 9, 14, 5.5, "#180c0c");
+      ctx.save(); ctx.scale(p, p);
+      const gr = ctx.createLinearGradient(0, -17, 0, 13);
+      gr.addColorStop(0, hurt ? "#ffffff" : "#ffb0a0"); gr.addColorStop(0.55, "#e04a3a"); gr.addColorStop(1, "#7a1a2a");
+      ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.moveTo(0, -17); ctx.lineTo(9, -6); ctx.lineTo(7, 8); ctx.lineTo(0, 13); ctx.lineTo(-7, 8); ctx.lineTo(-9, -6); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      if (o.coreHp < B.coreHp) {
+        rect(ctx, -16, -25, 32, 4, "rgba(0,0,0,0.75)");
+        rect(ctx, -15.3, -24.3, 30.6 * o.coreHp / B.coreHp, 2.6, "#ff6a55");
+      }
+    }
     if (vis(s.coreIdx)) {
       const p = 1 + Math.sin(time * 2.2) * 0.05, hurt = s.time - s.coreHitT < 0.25;
       at((s.coreIdx % W) + 0.5, ((s.coreIdx / W) | 0) + 0.5);
@@ -517,6 +533,7 @@
     for (const e of s.ents) {
       if (e.held || e.dead) continue;
       if (e.x < x0 - 1 || e.x > x1 + 2 || e.y < y0 - 1 || e.y > y1 + 2) continue;
+      if (s.pl && !e.foe && e.pl !== s.me && !s.seen[TT.tileOf(s, e)]) continue;   // Rivalen im Nebel bleiben verborgen
       list.push(e);
     }
     list.sort(function (a, b) { return a.y - b.y; });
@@ -699,6 +716,7 @@
     for (let i = 0; i < s.tiles.length; i++) {
       if (!s.seen[i]) { if (!s.mark[i]) continue; g.fillStyle = "#1f6b62"; }
       else if (s.mark[i]) g.fillStyle = "#37e0c8";
+      else if (s.own && s.own[i] && s.own[i] !== s.me + 1 && s.tiles[i] === TT.T.CLAIMED) g.fillStyle = s.room[i] ? "#8a2a22" : "#5a2420";
       else if (s.room[i]) g.fillStyle = TT.ROOMS[s.room[i]].color;
       else g.fillStyle = cols[s.tiles[i]];
       g.fillRect((i % W) * k, ((i / W) | 0) * k, k, k);
@@ -707,6 +725,11 @@
     for (const sh of s.shafts) dot(sh, "#ffd98a", 2);
     dot(s.rift.idx, Math.sin(time * 4) > 0 || s.rift.on ? "#b06cff" : "#5a3a8a", 2.5);
     dot(s.coreIdx, "#ffffff", 2.5);
+    if (s.pl) {
+      const o = s.pl[1 - s.me];
+      if (s.seen[o.coreIdx]) dot(o.coreIdx, Math.sin(time * 4) > 0 ? "#ff5a44" : "#ffd0c8", 3);
+      if (s.seen[o.rift.idx]) dot(o.rift.idx, "#7a3a5a", 2.5);
+    }
     if (s._tutTarget >= 0) {
       g.strokeStyle = "#ffcf5a"; g.lineWidth = 1.5; g.beginPath();
       g.arc((s._tutTarget % W) * k + k / 2, ((s._tutTarget / W) | 0) * k + k / 2, 5 + 2 * Math.sin(time * 5), 0, Math.PI * 2); g.stroke();
@@ -714,8 +737,10 @@
     for (const seal of s.seals || []) dot(seal.idx, seal.taken ? "#b06cff" : (Math.sin(time * 3) > -0.3 ? "#ffe9a0" : "#a08a50"), 3);
     for (const e of s.ents) {
       if (e.held) continue;
-      g.fillStyle = e.boss ? "#ffcf5a" : e.foe ? (e.guard ? "#c8503c" : "#ff5a3c") : e.worker ? "#e3b889" : "#9ffcf0";
-      const r = e.boss ? 5 : e.foe ? 3 : 2;
+      const riv = !!s.pl && !e.foe && e.pl !== s.me;
+      if (riv && !s.seen[TT.tileOf(s, e)]) continue;                  // Rivalen im Nebel bleiben verborgen
+      g.fillStyle = e.boss ? "#ffcf5a" : e.foe || riv ? (e.guard ? "#c8503c" : "#ff5a3c") : e.worker ? "#e3b889" : "#9ffcf0";
+      const r = e.boss ? 5 : e.foe || riv ? 3 : 2;
       g.fillRect(e.x * k - r / 2, e.y * k - r / 2, r, r);
     }
     g.strokeStyle = "rgba(255,255,255,0.8)"; g.lineWidth = 1;

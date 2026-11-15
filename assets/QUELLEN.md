@@ -68,6 +68,13 @@ crystal-shine, fire-ring, grab, lightning-storm, mining, minions, scroll-unfurle
 third-eye, wooden-door, wrecking-ball (Lorc); spikes (Sbed). Die Rahmen wurden umgefärbt,
 alles andere ist unverändert. Erzeugt werden die Dateien mit `tools/make-ui.js`.
 
+## Mehrspieler-Verbindung: PeerJS
+
+`vendor/peerjs.min.js` ist PeerJS 1.5.4 von Michelle Bu, Eric Zhang und Mitwirkenden (https://peerjs.com),
+MIT-Lizenz (Text in `vendor/peerjs.LICENSE.txt`), bezogen über https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js.
+Nur der Verweis auf die Quellkarte am Dateiende wurde entfernt. Für den Verbindungsaufbau nutzt PeerJS seinen
+kostenlosen öffentlichen Vermittlungsdienst (0.peerjs.com); übertragen wird dort nur die zufällige Raumkennung.
+
 ## Eigene Modelle hinzufügen
 
 1. Eine `.glb`-Datei besorgen (auf die Lizenz achten).

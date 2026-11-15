@@ -14,6 +14,7 @@ Zwei Spielarten stehen im Hauptmenü zur Wahl:
   dann den Endboss besiegen. Pro Gebiet gibt es bis zu drei Sterne.
 - **Freies Spiel:** Eine Zufallskarte, Überfälle ohne Ende; der Lichtvogt kommt mit
   dem zehnten Überfall.
+- **Mehrspieler:** Zu zweit über das Internet, per Raumcode (siehe unten).
 
 Reines HTML5 + JavaScript, keine Installation, keine Bild- oder Modelldateien:
 Karte, Kreaturen und Klänge entstehen zur Laufzeit aus Code.
@@ -84,6 +85,34 @@ unbezahlte, hungrige oder obdachlose Kreaturen werden wütend und gehen.
 
 Der Kampagnen-Fortschritt wird im Browser gespeichert, getrennt vom Spielstand.
 
+## Mehrspieler
+
+Im Hauptmenü unter **Mehrspieler** eröffnet einer ein Spiel und bekommt einen Raumcode
+aus fünf Zeichen. Der andere tippt den Code ein und klickt auf **Beitreten**. Es gibt
+keine Anmeldung und keinen eigenen Server: Der kostenlose Vermittlungsdienst von PeerJS
+stellt nur den Kontakt her, danach laufen die Daten direkt von Browser zu Browser (WebRTC).
+In sehr strengen Netzen (manche Firmen- oder Schulnetze) kann die Direktverbindung scheitern.
+
+Zwei Modi:
+
+- **Duell der Dungeons:** Beide spielen dieselbe Startkarte, jeder in seinem eigenen
+  Dungeon. Unter **Angriff** (links unten in der Werkzeugleiste) schickt man dem Rivalen
+  für Gold einen Spähtrupp, Kriegstrupp oder Heerzug, der bei ihm nach zehn Sekunden
+  Vorwarnung durch einen Schacht herabsteigt. Die normalen Überfälle der Oberwelt kommen
+  zusätzlich, der Lichtvogt nicht. Wessen Herzkern zuerst zerbricht, verliert. Rechts oben
+  steht laufend, wie es beim Rivalen aussieht.
+- **Gemeinsame Karte:** Beide Herzkerne auf einer spiegelgleichen Karte (Westen gegen
+  Osten). Grabt euch zueinander durch. Wühler übernehmen feindlichen Boden, der an den
+  eigenen grenzt, samt der Räume darauf. Kämpfer, die bis zu 30 Felder vor dem feindlichen
+  Herzkern stehen, greifen ihn an; feindliche Türen schlagen sie ein. Boden und Kreaturen
+  des Rivalen sind rot markiert, im Nebel bleibt er unsichtbar. Der Rechner des Gastgebers
+  rechnet die Partie, der Gast bekommt laufend die Änderungen (etwa 5 KB pro Sekunde).
+
+Im Mehrspieler gibt es keine Pause und kein Zeitraffer, und es wird nichts gespeichert.
+Bricht die Verbindung ab, merkt das Spiel es nach spätestens 15 Sekunden; im Duell kann
+man dann allein weiterspielen. Zum Ausprobieren auf einem einzigen Rechner:
+`index.html?net=lokal` in zwei Tabs öffnen. Diese verbinden sich dann ohne Internet.
+
 ## Aufbau des Codes
 
 | Datei | Inhalt |
@@ -94,6 +123,11 @@ Der Kampagnen-Fortschritt wird im Browser gespeichert, getrennt vom Spielstand.
 | `js/game.js` | Wirtschaft, Forschung, Überfälle, Siegelsteine und Endboss, Zauber, Spieleraktionen, Speichern |
 | `js/tutorial.js` | Das Tutorial: Gebiet „Das Erwachen“ und Orms elf Schritte |
 | `js/campaign.js` | Die acht Gebiete der Kampagne: Story, Kartengröße, Gegner, Freigaben, Bosse, Fortschritt |
+| `js/versus.js` | Mehrspieler „Gemeinsame Karte“: spiegelgleiche Karte, Ablauf für zwei Spieler, Abgleich Gastgeber → Gast |
+| `js/duel.js` | Mehrspieler „Duell der Dungeons“: Angriffstrupps, Lagebericht, Sieg |
+| `js/net.js` | Verbindung per Raumcode (PeerJS bzw. `?net=lokal` für zwei Tabs) |
+| `js/mp.js` | Mehrspieler-Ablauf: Raum eröffnen, beitreten, Nachrichten verteilen, Herzschlag |
+| `vendor/peerjs.min.js` | PeerJS 1.5.4 (fremde Bibliothek, MIT-Lizenz, unverändert bis auf den entfernten Quellkarten-Verweis) |
 | `js/render.js` | 2D-Ansicht, Kacheltexturen, Übersichtskarte |
 | `js/models3d.js` | Selbstgebaute 3D-Modelle: Einrichtung, Fallen, Herzkern – und Ersatzfiguren für Kreaturen ohne fertiges Modell |
 | `js/assets3d.js` | Zuordnung Kreatur → fertiges Modell und Animationen (`TT.MODEL_MAP`), Laden und Vorbereiten |
@@ -115,6 +149,7 @@ Der Kampagnen-Fortschritt wird im Browser gespeichert, getrennt vom Spielstand.
 | `tools/simtest.js` | Schnelltest der Spiellogik: `node tools/simtest.js` |
 | `tools/tutorialtest.js` | Spielt das Tutorial ohne Browser von vorn bis hinten durch |
 | `tools/campaigntest.js` | Prüft alle Kampagnenkarten; mit `--bot` spielt ein Bot jedes Gebiet im Zeitraffer |
+| `tools/versustest.js` | Zwei Bots spielen die gemeinsame Karte gegeneinander, samt Abgleich zum Gast (`--kurz` für eine Karte) |
 
 Zum Herumprobieren ist `js/config.js` der beste Einstieg: Kosten, Lebenspunkte,
 Überfall-Abstände und Lockbedingungen lassen sich dort direkt ändern.
